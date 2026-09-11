@@ -1,6 +1,6 @@
 // GET /admin/signatures — 签名聚合全表；?sig=xxx 右侧抽屉：分布 + 样本
 
-import { badge, esc, errorPage, guard, layout, page, RE_FILTER, sql, table } from './_layout.js'
+import { badge, drawer, esc, errorPage, guard, layout, page, RE_FILTER, sql, table } from './_layout.js'
 
 function dist(rows, keyIdx) {
   const total = rows.reduce((a, r) => a + Number(r[1]), 0) || 1
@@ -16,7 +16,7 @@ function dist(rows, keyIdx) {
   }).join('')
 }
 
-async function drawer(env, sig) {
+async function sigDrawer(env, sig) {
   const [[summary], shells, plugins, samples] = await Promise.all([
     sql(env, `SELECT count(*), min(created_at), max(created_at), max(category) FROM reports WHERE sig = '${sig}'`).then((r) => r[0]),
     sql(env, `SELECT shell, count(*) FROM reports WHERE sig = '${sig}' GROUP BY shell ORDER BY count(*) DESC LIMIT 8`),
@@ -30,13 +30,10 @@ async function drawer(env, sig) {
     <td class="px-3 py-2 text-xs">${esc(r[2] ?? '')}</td>
     <td class="px-3 py-2 text-xs text-slate-400">${esc(String(r[4]).slice(5, 16))}</td></tr>`).join('')
 
-  return `
-  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-[26rem] shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
-    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-      <span class="break-all font-mono text-sm font-semibold">${esc(sig)}</span>
-      <a href="/admin/signatures" class="ml-2 shrink-0 rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
-    </div>
-    <div class="border-b border-slate-100 px-4 py-3 text-sm text-slate-600">
+  return drawer(
+    `<span class="font-mono">${esc(sig)}</span>`,
+    '/admin/signatures',
+    `<div class="border-b border-slate-100 px-4 py-3 text-sm text-slate-600">
       ${badge(summary[3] ?? 'other', 'indigo')}
       <span class="ml-2">共 <b>${summary[0]}</b> 次</span>
       <div class="mt-1 text-xs text-slate-400">首现 ${esc(String(summary[1]).slice(0, 10))} · 最近 ${esc(String(summary[2]).slice(0, 16))}</div>
@@ -50,8 +47,9 @@ async function drawer(env, sig) {
       <table class="min-w-full divide-y divide-slate-100 text-sm">
         <tbody class="divide-y divide-slate-100">${sampleRows}</tbody>
       </table>
-    </div>
-  </aside>`
+    </div>`,
+    'w-[26rem]',
+  )
 }
 
 export async function onRequestGet(context) {
@@ -74,7 +72,7 @@ export async function onRequestGet(context) {
       <td class="px-4 py-2.5 text-slate-400">${esc(String(r[5]).slice(0, 10))}</td>
       <td class="px-4 py-2.5 text-slate-400">${esc(String(r[6]).slice(0, 16))}</td></tr>`).join('')
 
-    const panel = sig && RE_FILTER.test(sig) ? await drawer(env, sig) : ''
+    const panel = sig && RE_FILTER.test(sig) ? await sigDrawer(env, sig) : ''
 
     return page(layout({
       title: '签名分析',

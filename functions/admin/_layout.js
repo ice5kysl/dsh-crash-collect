@@ -124,12 +124,13 @@ export const badge = (text, tone = 'slate') => {
   return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone] ?? tones.slate}">${esc(text)}</span>`
 }
 
-// 右侧抽屉（sticky aside）：与 reports/tables 详情面板同一模式
-export const drawer = (title, closeHref, bodyHtml) => `
-  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-96 shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
-    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-      <span class="text-sm font-semibold">${title}</span>
-      <a href="${closeHref}" class="rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
+// 右侧抽屉（sticky aside）：全站详情统一走这里。width 按内容定（默认 w-[42rem]），
+// max-w-[90vw] 保证窄屏不溢出
+export const drawer = (title, closeHref, bodyHtml, width = 'w-[42rem]') => `
+  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] ${width} max-w-[90vw] shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
+    <div class="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+      <span class="break-all text-sm font-semibold">${title}</span>
+      <a href="${closeHref}" class="shrink-0 rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
     </div>
     ${bodyHtml}
   </aside>`
@@ -140,5 +141,6 @@ export const field = (label, valueHtml) => `
       <div class="break-all font-mono text-xs text-slate-800">${valueHtml}</div>
     </div>`
 
+// pre-wrap + break-all：宽抽屉里 JSON 自动换行，不出现横向滚动条
 export const jsonBlock = (obj) => `
-    <pre class="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">${esc(JSON.stringify(obj, null, 2))}</pre>`
+    <pre class="whitespace-pre-wrap break-all rounded-lg bg-slate-900 p-3 font-mono text-xs leading-relaxed text-slate-100">${esc(JSON.stringify(obj, null, 2))}</pre>`

@@ -1,32 +1,26 @@
 // GET /admin/reports — 上报明细：组合过滤 + 分页；?id=N 右侧抽屉展示完整记录
 
-import { badge, esc, errorPage, guard, layout, page, RE_FILTER, sql, table } from './_layout.js'
+import { badge, drawer, esc, errorPage, field, guard, jsonBlock, layout, page, RE_FILTER, sql, table } from './_layout.js'
 
 const PAGE_SIZE = 50
 const FIELDS = ['id', 'sig', 'category', 'shell', 'plugin', 'plugin_ver', 'code', 'turns', 'created_at']
 
-function drawer(id, row, backQs) {
+function reportDrawer(id, row, backQs) {
   const obj = Object.fromEntries(FIELDS.map((f, i) => [f, row[i]]))
-  const fields = FIELDS.map((f, i) => `
-    <div class="border-b border-slate-100 px-4 py-2">
-      <div class="text-xs text-slate-400">${f}</div>
-      <div class="break-all font-mono text-xs text-slate-800">${f === 'sig'
-        ? `<a class="text-indigo-600 hover:underline" href="/admin/signatures?sig=${encodeURIComponent(row[i])}">${esc(row[i])}</a>`
-        : (row[i] == null || row[i] === '' ? '<span class="text-slate-300">—</span>' : esc(row[i]))}</div>
-    </div>`).join('')
-  return `
-  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-96 shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
-    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-      <span class="text-sm font-semibold">上报 #${id}</span>
-      <a href="/admin/reports?${backQs}" class="rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
-    </div>
-    ${fields}
+  const fields = FIELDS.map((f, i) => field(f, f === 'sig'
+    ? `<a class="text-indigo-600 hover:underline" href="/admin/signatures?sig=${encodeURIComponent(row[i])}">${esc(row[i])}</a>`
+    : (row[i] == null || row[i] === '' ? '<span class="text-slate-300">—</span>' : esc(row[i])))).join('')
+  return drawer(
+    `上报 #${id}`,
+    `/admin/reports?${backQs}`,
+    `${fields}
     <div class="p-4">
       <div class="mb-1 text-xs font-semibold text-slate-500">原始记录（JSON）</div>
-      <pre class="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">${esc(JSON.stringify(obj, null, 2))}</pre>
+      ${jsonBlock(obj)}
       <p class="mt-2 text-xs text-slate-400">入库前已通过白名单校验：只有结构化字段，绝不含消息文本、文件路径或 prompt。</p>
-    </div>
-  </aside>`
+    </div>`,
+    'w-[32rem]',
+  )
 }
 
 export async function onRequestGet(context) {
@@ -78,8 +72,8 @@ export async function onRequestGet(context) {
     if (Number.isInteger(id) && id > 0) {
       const full = await sql(env, `SELECT ${FIELDS.join(', ')} FROM reports WHERE id = ${id} LIMIT 1`)
       panel = full.length
-        ? drawer(id, full[0], qs.toString())
-        : `<div class="w-96 shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">记录 #${id} 不存在。</div>`
+        ? reportDrawer(id, full[0], qs.toString())
+        : `<div class="w-[32rem] max-w-[90vw] shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">记录 #${id} 不存在。</div>`
     }
 
     return page(layout({

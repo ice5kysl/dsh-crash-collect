@@ -49,9 +49,10 @@ export async function onRequestGet(context) {
           field('model', esc(r[3] ?? '—')) +
           `<div class="p-4"><div class="mb-1 text-xs font-semibold text-slate-500">usage</div>${jsonBlock(parseJson(r[4]) ?? null)}</div>` +
           `<div class="p-4 pt-0"><div class="mb-1 text-xs font-semibold text-slate-500">extra</div>${jsonBlock(parseJson(r[5]) ?? null)}</div>`,
+          'w-[36rem]',
         )
       } else {
-        panel = `<div class="w-96 shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">周报 ${esc(selWeek)} 不存在。</div>`
+        panel = `<div class="w-[36rem] max-w-[90vw] shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">周报 ${esc(selWeek)} 不存在。</div>`
       }
     }
 

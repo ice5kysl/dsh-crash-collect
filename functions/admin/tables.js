@@ -1,10 +1,15 @@
-// GET /admin/tables — db9 库浏览（三栏）：侧边导航 | 表清单 | 多 tab 面板（结构/数据）→ 右侧抽屉行详情
+// GET /admin/tables — db9 库浏览（三栏）：侧边导航 | 表清单（行数+体积） | 多 tab 面板（结构/数据）→ 右侧抽屉行详情
 //
 // 只读。表名先与 information_schema 实际清单比对后才入库查询（杜绝注入）。
 // 行定位：db9 是 TiKV 底座，没有 ctid —— 优先用主键，无 PK 的表退化为 OFFSET 序号。
 // 深链：?table=plugins&tab=data&page=2&row=<pk>
+//
+// 行数：pg_class.reltuples 恒为 -1、pg_stat_user_tables.n_live_tup 恒为 0（TiKV 不维护统计），
+// 故对每张表并行 count(*)（10 张表 ~2s），页面展示的是精确值。
+// 体积：pg_total_relation_size / pg_relation_size / pg_table_size 均报 function does not exist，
+// information_schema.tables 没有 data_length 列 —— TiKV 兼容层都不支持，只能显示 "—"。
 
-import { esc, errorPage, guard, layout, page, sql } from './_layout.js'
+import { drawer, esc, errorPage, guard, jsonBlock, layout, page, sql } from './_layout.js'
 
 const PAGE_SIZE = 20
 const RE_TABLE = /^[a-z_][a-z0-9_]{0,62}$/
@@ -14,23 +19,36 @@ const TABS = [
   ['data', '数据'],
 ]
 
+// 10 条 count(*) 并行 ~10s（db9 HTTP 端并发受限），合成 UNION ALL 又会触发 TiKV
+// transaction memory limit —— 只能逐条并行，加 2 分钟模块级缓存摊薄后续访问
+let tablesCache = null
+const TABLES_CACHE_TTL = 120_000
+
 async function listTables(env) {
-  return sql(env, `SELECT c.relname, c.reltuples::bigint
-    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`)
+  if (tablesCache && Date.now() - tablesCache.at < TABLES_CACHE_TTL) return tablesCache.tables
+  const names = (await sql(env, `SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name`)).map((r) => r[0])
+  const counts = await Promise.all(
+    names.map((n) => sql(env, `SELECT count(*) FROM "${n}"`).then((r) => Number(r[0][0]))),
+  )
+  const tables = names.map((n, i) => [n, counts[i]])
+  tablesCache = { at: Date.now(), tables }
+  return tables
 }
 
 function tableList(tables, active) {
   const items = tables.map((t) => {
     const on = t[0] === active
     return `<a href="/admin/tables?table=${encodeURIComponent(t[0])}"
-      class="flex items-baseline justify-between gap-2 rounded-lg px-3 py-1.5 text-sm transition ${
-        on ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200/70'
-      }"><span class="truncate font-mono text-xs">${esc(t[0])}</span><span class="shrink-0 text-xs ${on ? 'text-indigo-200' : 'text-slate-400'}">${t[1] < 0 ? '—' : `≈${t[1]}`}</span></a>`
+      class="rounded-lg px-3 py-1.5 transition ${on ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200/70'}">
+      <span class="block truncate font-mono text-xs">${esc(t[0])}</span>
+      <span class="mt-0.5 block text-xs ${on ? 'text-indigo-200' : 'text-slate-400'}">${t[1].toLocaleString()} 行 · —</span></a>`
   }).join('')
   return `
-  <div class="sticky top-8 max-h-[calc(100vh-6rem)] w-52 shrink-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-    <div class="px-3 pb-2 pt-1 text-xs font-semibold text-slate-400">表清单（${tables.length}）</div>
+  <div class="sticky top-8 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+    <div class="flex items-baseline justify-between px-3 pb-2 pt-1 text-xs font-semibold text-slate-400">
+      <span>表清单（${tables.length}）</span><span class="font-normal">行数 · 体积</span>
+    </div>
     <div class="flex flex-col gap-0.5">${items}</div>
   </div>`
 }
@@ -42,18 +60,15 @@ function rowPanel(name, cols, row, backQs) {
       <div class="text-xs text-slate-400">${esc(c)}</div>
       <div class="break-all font-mono text-xs text-slate-800">${row[i] == null ? '<span class="text-slate-300">NULL</span>' : esc(row[i])}</div>
     </div>`).join('')
-  return `
-  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-96 shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
-    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-      <span class="text-sm font-semibold">行详情 · ${esc(name)}</span>
-      <a href="/admin/tables?${backQs}" class="rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
-    </div>
-    ${fields}
+  return drawer(
+    `行详情 · ${esc(name)}`,
+    `/admin/tables?${backQs}`,
+    `${fields}
     <div class="p-4">
       <div class="mb-1 text-xs font-semibold text-slate-500">JSON</div>
-      <pre class="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">${esc(JSON.stringify(obj, null, 2))}</pre>
-    </div>
-  </aside>`
+      ${jsonBlock(obj)}
+    </div>`,
+  )
 }
 
 async function tablePanel(env, url, name) {
@@ -171,7 +186,7 @@ export async function onRequestGet(context) {
       title: '表浏览',
       active: 'tables',
       content: `
-      <p class="mb-4 text-sm text-slate-500">db9 库 <code class="rounded bg-slate-200 px-1.5 py-0.5 text-xs">dsh-data</code>（public schema，只读视图；表清单行数为优化器估算）</p>
+      <p class="mb-4 text-sm text-slate-500">db9 库 <code class="rounded bg-slate-200 px-1.5 py-0.5 text-xs">dsh-data</code>（public schema，只读视图；行数为精确 count(*)，缓存 2 分钟；体积 TiKV 兼容层暂不支持）</p>
       <div class="flex items-start gap-6">
         ${tableList(tables, name)}
         <div class="min-w-0 flex-1">${main}</div>

@@ -30,7 +30,7 @@ async function pluginDrawer(env, fullName, backQs) {
     sql(env, `SELECT category, capability_tags, summary_zh, confidence, model, tagged_at
               FROM plugin_llm_tags WHERE full_name = ${sqlStr(fullName)} LIMIT 1`).then((r) => r[0]),
   ])
-  if (!plugin) return `<div class="w-96 shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">插件 ${esc(fullName)} 不存在。</div>`
+  if (!plugin) return `<div class="w-[42rem] max-w-[90vw] shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">插件 ${esc(fullName)} 不存在。</div>`
 
   const compat = plugin[4]
     ? await sql(env, `SELECT version, client, observed_at FROM compat_observations

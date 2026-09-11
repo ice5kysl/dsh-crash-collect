@@ -39,6 +39,7 @@ const NAV = [
   { href: '/admin', key: 'overview', label: '总览', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
   { href: '/admin/reports', key: 'reports', label: '上报明细', icon: 'M4 6h16M4 12h16M4 18h10' },
   { href: '/admin/signatures', key: 'signatures', label: '签名分析', icon: 'M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6' },
+  { href: '/admin/tables', key: 'tables', label: '数据库', icon: 'M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3zM4 12c0 1.7 3.6 3 8 3s8-1.3 8-3M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3' },
 ]
 
 export function layout({ title, active, content }) {

@@ -1,7 +1,8 @@
 // /admin 共享模块：鉴权、SQL、布局（Tailwind Play CDN + 侧边栏）
 // 本文件以 _ 开头，仅被其他 admin 路由 import，不作为页面使用。
 
-export const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
+// db9 库已从 dsh-crash(wqxvoyf8yu05) 迁到 dsh-data(toc6zdt4vd7j)，reports 与生态表同库
+export const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
 
 export function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -36,16 +37,25 @@ export async function sql(env, query) {
 export const RE_FILTER = /^[a-z0-9@/._+-]{1,128}$/i
 
 const NAV = [
+  { group: '崩溃收集' },
   { href: '/admin', key: 'overview', label: '总览', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
   { href: '/admin/reports', key: 'reports', label: '上报明细', icon: 'M4 6h16M4 12h16M4 18h10' },
   { href: '/admin/signatures', key: 'signatures', label: '签名分析', icon: 'M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6' },
-  { href: '/admin/tables', key: 'tables', label: '数据库', icon: 'M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3zM4 12c0 1.7 3.6 3 8 3s8-1.3 8-3M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3' },
+  { group: '生态数据' },
+  { href: '/admin/plugins', key: 'plugins', label: '插件', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
+  { href: '/admin/events', key: 'events', label: '事件', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+  { href: '/admin/letters', key: 'letters', label: '周报', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+  { group: '数据库' },
+  { href: '/admin/tables', key: 'tables', label: '表浏览', icon: 'M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3zM4 12c0 1.7 3.6 3 8 3s8-1.3 8-3M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3' },
 ]
 
 export function layout({ title, active, content }) {
   const nav = NAV.map((n) => {
+    if (n.group) {
+      return `<div class="mt-5 px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-500 first:mt-0">${n.group}</div>`
+    }
     const on = n.key === active
-    return `<a href="${n.href}" class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+    return `<a href="${n.href}" class="ml-2 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
       on ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
     }"><svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="${n.icon}"/></svg>${n.label}</a>`
   }).join('')
@@ -108,6 +118,26 @@ export const badge = (text, tone = 'slate') => {
     indigo: 'bg-indigo-100 text-indigo-700',
     red: 'bg-red-100 text-red-700',
     amber: 'bg-amber-100 text-amber-700',
+    green: 'bg-emerald-100 text-emerald-700',
   }
   return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone] ?? tones.slate}">${esc(text)}</span>`
 }
+
+// 右侧抽屉（sticky aside）：与 reports/tables 详情面板同一模式
+export const drawer = (title, closeHref, bodyHtml) => `
+  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-96 shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
+    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+      <span class="text-sm font-semibold">${title}</span>
+      <a href="${closeHref}" class="rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
+    </div>
+    ${bodyHtml}
+  </aside>`
+
+export const field = (label, valueHtml) => `
+    <div class="border-b border-slate-100 px-4 py-2">
+      <div class="text-xs text-slate-400">${label}</div>
+      <div class="break-all font-mono text-xs text-slate-800">${valueHtml}</div>
+    </div>`
+
+export const jsonBlock = (obj) => `
+    <pre class="overflow-x-auto rounded-lg bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">${esc(JSON.stringify(obj, null, 2))}</pre>`

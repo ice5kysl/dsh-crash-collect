@@ -1,6 +1,6 @@
 // GET /v1/stats — 公开统计：累计上报数与去重签名数（透明度页面可用）
 
-const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
+const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {

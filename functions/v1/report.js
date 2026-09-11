@@ -18,7 +18,7 @@ const RE_CODE = /^[A-Za-z0-9_.:-]{1,64}$/
 
 const DAILY_CAP = 20000
 const MAX_BODY_BYTES = 16384
-const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
+const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {

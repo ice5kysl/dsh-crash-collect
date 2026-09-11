@@ -9,12 +9,16 @@ export async function onRequestGet(context) {
   if (!env.DB9_TOKEN) return new Response('DB9_TOKEN not configured', { status: 503 })
 
   try {
-    const [[total, sigs], today, top, recent] = await Promise.all([
+    const [[total, sigs], today, top, recent, [plugins], [events], latestRelease] = await Promise.all([
       sql(env, 'SELECT count(*), count(DISTINCT sig) FROM reports').then((r) => r[0]),
       sql(env, "SELECT count(*) FROM reports WHERE created_at > now() - interval '24 hours'").then((r) => r[0][0]),
       sql(env, `SELECT sig, category, count(*), count(DISTINCT shell), max(created_at)
                 FROM reports GROUP BY sig, category ORDER BY count(*) DESC, max(created_at) DESC LIMIT 10`),
       sql(env, 'SELECT id, sig, category, shell, plugin, code, created_at FROM reports ORDER BY id DESC LIMIT 10'),
+      sql(env, 'SELECT count(*) FROM plugins').then((r) => r[0]),
+      sql(env, 'SELECT count(*) FROM ecosystem_events').then((r) => r[0]),
+      sql(env, `SELECT key, occurred_at FROM ecosystem_events WHERE type = 'shell_release'
+                ORDER BY occurred_at DESC LIMIT 1`).then((r) => r[0]),
     ])
 
     const topRows = top.map((r) => `<tr class="hover:bg-slate-50">
@@ -37,10 +41,15 @@ export async function onRequestGet(context) {
       title: '总览',
       active: 'overview',
       content: `
-      <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         ${card('累计上报', total)}
         ${card('去重签名', sigs)}
         ${card('最近 24 小时', today)}
+      </div>
+      <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <a href="/admin/plugins" class="block transition hover:-translate-y-0.5">${card('生态插件', plugins, 'dsh-insights 收录，点击查看插件库')}</a>
+        <a href="/admin/events" class="block transition hover:-translate-y-0.5">${card('生态事件', events, '发版 / 上架 / 模型观察')}</a>
+        <a href="/admin/events?type=shell_release" class="block transition hover:-translate-y-0.5">${card('最近发版', latestRelease ? esc(latestRelease[0]) : '—', latestRelease ? esc(String(latestRelease[1]).slice(0, 19)) : '')}</a>
       </div>
       <div class="space-y-8">
         <section>

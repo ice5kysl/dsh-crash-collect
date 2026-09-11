@@ -3,7 +3,7 @@
 // （pipeline 也可以绕过本端点直接 psql 查库——此端点只是便捷通道。）
 // EXPORT_KEY 在 Pages 项目环境变量中配置，不写入仓库。
 
-const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
+const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
 const MAX_LIMIT = 20000
 
 function json(data, status = 200) {

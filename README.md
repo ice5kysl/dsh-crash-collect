@@ -1,6 +1,6 @@
 # dsh-crash-collect
 
-dsh-why 崩溃案例上报的收集端点，部署在 **EdgeOne Pages Functions**（免费版：每月 300 万次边缘函数请求），存储用 **db9**（serverless Postgres，库 `dsh-crash`）。
+dsh-why 崩溃案例上报的收集端点，部署在 **EdgeOne Pages Functions**（免费版：每月 300 万次边缘函数请求），存储用 **db9**（serverless Postgres，库 `dsh-data`）。
 
 ## 端点
 
@@ -31,7 +31,7 @@ dsh-why 崩溃案例上报的收集端点，部署在 **EdgeOne Pages Functions*
 
 ## 存储（db9）
 
-库 `dsh-crash`（id `wqxvoyf8yu05`），表 `reports`：
+库 `dsh-data`（id `toc6zdt4vd7j`，与 dsh-insights 生态表同库；2026-09 自旧库 `dsh-crash` 迁入），表 `reports`：
 
 ```sql
 id BIGSERIAL PK · sig TEXT · category TEXT · shell TEXT ·
@@ -52,7 +52,7 @@ FROM reports GROUP BY sig, category ORDER BY count(*) DESC;
 | 变量 | 用途 |
 |---|---|
 | `DB9_TOKEN` | db9 named API token（scoped 到本用途，可独立吊销） |
-| `DB9_SQL_URL` | 可选，覆盖 SQL API 地址（默认库 `dsh-crash`） |
+| `DB9_SQL_URL` | 可选，覆盖 SQL API 地址（默认库 `dsh-data`） |
 | `EXPORT_KEY` | `/v1/export` 的访问密钥 |
 
 ## 部署

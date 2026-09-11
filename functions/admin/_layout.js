@@ -1,0 +1,112 @@
+// /admin 共享模块：鉴权、SQL、布局（Tailwind Play CDN + 侧边栏）
+// 本文件以 _ 开头，仅被其他 admin 路由 import，不作为页面使用。
+
+export const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
+
+export function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Basic Auth：通过返回 null；未通过返回 401 Response。密码取 ADMIN_KEY，缺省回落 EXPORT_KEY。
+export function guard({ request, env }) {
+  const key = (env && (env.ADMIN_KEY || env.EXPORT_KEY)) || null
+  if (!key) return new Response('admin not configured', { status: 503 })
+  const auth = request.headers.get('authorization') || ''
+  const pass = auth.startsWith('Basic ') ? atob(auth.slice(6)).split(':').slice(1).join(':') : ''
+  if (pass !== key) {
+    return new Response('401', {
+      status: 401,
+      headers: { 'www-authenticate': 'Basic realm="dsh-crash-admin"' },
+    })
+  }
+  return null
+}
+
+export async function sql(env, query) {
+  const res = await fetch((env && env.DB9_SQL_URL) || DEFAULT_SQL_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${env.DB9_TOKEN}` },
+    body: JSON.stringify({ query }),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.rows === undefined) throw new Error(body?.message ?? `HTTP ${res.status}`)
+  return body.rows
+}
+
+export const RE_FILTER = /^[a-z0-9@/._+-]{1,128}$/i
+
+const NAV = [
+  { href: '/admin', key: 'overview', label: '总览', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
+  { href: '/admin/reports', key: 'reports', label: '上报明细', icon: 'M4 6h16M4 12h16M4 18h10' },
+  { href: '/admin/signatures', key: 'signatures', label: '签名分析', icon: 'M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6' },
+]
+
+export function layout({ title, active, content }) {
+  const nav = NAV.map((n) => {
+    const on = n.key === active
+    return `<a href="${n.href}" class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+      on ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+    }"><svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="${n.icon}"/></svg>${n.label}</a>`
+  }).join('')
+
+  return `<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title} · dsh-crash admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased">
+<div class="flex min-h-screen">
+  <aside class="fixed inset-y-0 left-0 flex w-60 flex-col bg-slate-900 px-4 py-6">
+    <div class="mb-8 px-2">
+      <div class="text-lg font-bold text-white">dsh-crash</div>
+      <div class="text-xs text-slate-400">崩溃案例库管理后台</div>
+    </div>
+    <nav class="flex flex-col gap-1">${nav}</nav>
+    <div class="mt-auto space-y-2 px-2 text-xs text-slate-500">
+      <a href="/v1/stats" class="block hover:text-slate-300">公开统计 /v1/stats ↗</a>
+      <a href="https://github.com/ice5kysl/dsh-crash-collect" class="block hover:text-slate-300">dsh-crash-collect ↗</a>
+      <div>只收集白名单结构化字段</div>
+    </div>
+  </aside>
+  <main class="ml-60 flex-1 p-8">
+    <h1 class="mb-6 text-xl font-bold text-slate-900">${title}</h1>
+    ${content}
+  </main>
+</div>
+</body></html>`
+}
+
+export function page(html, status = 200) {
+  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=UTF-8' } })
+}
+
+export function errorPage(err) {
+  return page(`<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:40px">
+    <h1>存储不可用</h1><p>${esc(err?.message ?? err)}</p></body>`, 502)
+}
+
+export const card = (label, value, sub = '') => `
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div class="text-sm text-slate-500">${label}</div>
+    <div class="mt-1 text-3xl font-bold text-slate-900">${value}</div>
+    ${sub ? `<div class="mt-1 text-xs text-slate-400">${sub}</div>` : ''}
+  </div>`
+
+export const table = (heads, rows, empty = '暂无数据') => `
+  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50"><tr>${heads.map((h) => `<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">${h}</th>`).join('')}</tr></thead>
+      <tbody class="divide-y divide-slate-100">${rows || `<tr><td colspan="${heads.length}" class="px-4 py-8 text-center text-slate-400">${empty}</td></tr>`}</tbody>
+    </table>
+  </div>`
+
+export const badge = (text, tone = 'slate') => {
+  const tones = {
+    slate: 'bg-slate-100 text-slate-700',
+    indigo: 'bg-indigo-100 text-indigo-700',
+    red: 'bg-red-100 text-red-700',
+    amber: 'bg-amber-100 text-amber-700',
+  }
+  return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone] ?? tones.slate}">${esc(text)}</span>`
+}

@@ -1,59 +1,57 @@
-// GET /admin/signatures — 签名聚合全表；?sig=xxx 下钻单个签名的分布与明细
+// GET /admin/signatures — 签名聚合全表；?sig=xxx 右侧抽屉：分布 + 样本
 
 import { badge, esc, errorPage, guard, layout, page, RE_FILTER, sql, table } from './_layout.js'
 
-function dist(rows, keyIdx, linkPrefix) {
+function dist(rows, keyIdx) {
   const total = rows.reduce((a, r) => a + Number(r[1]), 0) || 1
   return rows.map((r) => {
     const pct = Math.round((Number(r[1]) / total) * 100)
     return `<div class="mb-2">
       <div class="mb-0.5 flex justify-between text-xs">
-        <span class="font-mono">${linkPrefix ? `<a class="text-indigo-600 hover:underline" href="${linkPrefix}${encodeURIComponent(r[keyIdx])}">${esc(r[keyIdx])}</a>` : esc(r[keyIdx])}</span>
-        <span class="text-slate-500">${r[1]} 次 · ${pct}%</span>
+        <span class="break-all font-mono">${esc(r[keyIdx])}</span>
+        <span class="ml-2 shrink-0 text-slate-500">${r[1]} 次 · ${pct}%</span>
       </div>
       <div class="h-1.5 rounded-full bg-slate-100"><div class="h-1.5 rounded-full bg-indigo-500" style="width:${pct}%"></div></div>
     </div>`
   }).join('')
 }
 
-async function detail(env, sig) {
+async function drawer(env, sig) {
   const [[summary], shells, plugins, samples] = await Promise.all([
     sql(env, `SELECT count(*), min(created_at), max(created_at), max(category) FROM reports WHERE sig = '${sig}'`).then((r) => r[0]),
-    sql(env, `SELECT shell, count(*) FROM reports WHERE sig = '${sig}' GROUP BY shell ORDER BY count(*) DESC LIMIT 10`),
-    sql(env, `SELECT coalesce(plugin, '(无插件信息)'), count(*) FROM reports WHERE sig = '${sig}' GROUP BY plugin ORDER BY count(*) DESC LIMIT 10`),
-    sql(env, `SELECT id, shell, plugin, plugin_ver, code, turns, created_at FROM reports WHERE sig = '${sig}' ORDER BY id DESC LIMIT 20`),
+    sql(env, `SELECT shell, count(*) FROM reports WHERE sig = '${sig}' GROUP BY shell ORDER BY count(*) DESC LIMIT 8`),
+    sql(env, `SELECT coalesce(plugin, '(无插件信息)'), count(*) FROM reports WHERE sig = '${sig}' GROUP BY plugin ORDER BY count(*) DESC LIMIT 8`),
+    sql(env, `SELECT id, shell, plugin, code, created_at FROM reports WHERE sig = '${sig}' ORDER BY id DESC LIMIT 10`),
   ])
 
   const sampleRows = samples.map((r) => `<tr class="hover:bg-slate-50">
-    <td class="px-4 py-2.5 text-slate-400">#${r[0]}</td>
-    <td class="px-4 py-2.5 font-mono text-xs">${esc(r[1])}</td>
-    <td class="px-4 py-2.5">${esc(r[2] ?? '')}</td>
-    <td class="px-4 py-2.5 font-mono text-xs">${esc(r[3] ?? '')}</td>
-    <td class="px-4 py-2.5">${r[4] ? badge(r[4], 'amber') : ''}</td>
-    <td class="px-4 py-2.5 text-right">${r[5] ?? ''}</td>
-    <td class="px-4 py-2.5 text-slate-400">${esc(String(r[6]).slice(0, 19))}</td></tr>`).join('')
+    <td class="px-3 py-2"><a class="text-indigo-600 hover:underline" href="/admin/reports?id=${r[0]}">#${r[0]}</a></td>
+    <td class="px-3 py-2 font-mono text-xs">${esc(r[1])}</td>
+    <td class="px-3 py-2 text-xs">${esc(r[2] ?? '')}</td>
+    <td class="px-3 py-2 text-xs text-slate-400">${esc(String(r[4]).slice(5, 16))}</td></tr>`).join('')
 
-  return layout({
-    title: `签名 ${sig}`,
-    active: 'signatures',
-    content: `
-    <div class="mb-6 flex flex-wrap items-center gap-3">
-      <span class="font-mono text-sm">${esc(sig)}</span>
+  return `
+  <aside class="sticky top-8 max-h-[calc(100vh-6rem)] w-[26rem] shrink-0 overflow-y-auto rounded-xl border border-indigo-200 bg-white shadow-lg">
+    <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+      <span class="break-all font-mono text-sm font-semibold">${esc(sig)}</span>
+      <a href="/admin/signatures" class="ml-2 shrink-0 rounded-lg px-2 py-1 text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</a>
+    </div>
+    <div class="border-b border-slate-100 px-4 py-3 text-sm text-slate-600">
       ${badge(summary[3] ?? 'other', 'indigo')}
-      <span class="text-sm text-slate-500">共 <b>${summary[0]}</b> 次 · 首现 ${esc(String(summary[1]).slice(0, 10))} · 最近 ${esc(String(summary[2]).slice(0, 16))}</span>
-      <a href="/admin/signatures" class="ml-auto text-sm text-indigo-600 hover:underline">← 全部签名</a>
+      <span class="ml-2">共 <b>${summary[0]}</b> 次</span>
+      <div class="mt-1 text-xs text-slate-400">首现 ${esc(String(summary[1]).slice(0, 10))} · 最近 ${esc(String(summary[2]).slice(0, 16))}</div>
     </div>
-    <div class="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-4 text-sm font-semibold">shell 版本分布</h3>${dist(shells, 0)}
-      </div>
-      <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h3 class="mb-4 text-sm font-semibold">插件分布</h3>${dist(plugins, 0, '/admin/reports?plugin=')}
-      </div>
+    <div class="border-b border-slate-100 px-4 py-3">
+      <div class="mb-3 text-xs font-semibold text-slate-500">shell 版本分布</div>${dist(shells, 0)}
+      <div class="mb-3 mt-4 text-xs font-semibold text-slate-500">插件分布</div>${dist(plugins, 0)}
     </div>
-    <h3 class="mb-3 text-sm font-semibold">样本（最近 20 条）</h3>
-    ${table(['id', 'shell', 'plugin', 'ver', 'code', 'turns', '时间'], sampleRows)}`,
-  })
+    <div class="px-4 py-3">
+      <div class="mb-2 text-xs font-semibold text-slate-500">样本（最近 ${samples.length} 条）</div>
+      <table class="min-w-full divide-y divide-slate-100 text-sm">
+        <tbody class="divide-y divide-slate-100">${sampleRows}</tbody>
+      </table>
+    </div>
+  </aside>`
 }
 
 export async function onRequestGet(context) {
@@ -64,12 +62,10 @@ export async function onRequestGet(context) {
 
   const sig = new URL(request.url).searchParams.get('sig')
   try {
-    if (sig && RE_FILTER.test(sig)) return page(await detail(env, sig))
-
     const rows = await sql(env, `SELECT sig, category, count(*), count(DISTINCT shell), count(DISTINCT plugin),
       min(created_at), max(created_at) FROM reports GROUP BY sig, category
       ORDER BY count(*) DESC, max(created_at) DESC LIMIT 200`)
-    const bodyRows = rows.map((r) => `<tr class="hover:bg-slate-50">
+    const bodyRows = rows.map((r) => `<tr class="hover:bg-indigo-50 ${sig === r[0] ? 'bg-indigo-50' : ''}">
       <td class="px-4 py-2.5 font-mono text-xs"><a class="text-indigo-600 hover:underline" href="/admin/signatures?sig=${encodeURIComponent(r[0])}">${esc(r[0])}</a></td>
       <td class="px-4 py-2.5">${badge(r[1], 'indigo')}</td>
       <td class="px-4 py-2.5 text-right font-semibold">${r[2]}</td>
@@ -78,12 +74,19 @@ export async function onRequestGet(context) {
       <td class="px-4 py-2.5 text-slate-400">${esc(String(r[5]).slice(0, 10))}</td>
       <td class="px-4 py-2.5 text-slate-400">${esc(String(r[6]).slice(0, 16))}</td></tr>`).join('')
 
+    const panel = sig && RE_FILTER.test(sig) ? await drawer(env, sig) : ''
+
     return page(layout({
       title: '签名分析',
       active: 'signatures',
       content: `
-      <p class="mb-4 text-sm text-slate-500">同一签名 = 同一类故障。次数即「全生态出现 N 次」的数据源；点击签名查看版本与插件分布。</p>
-      ${table(['sig', 'category', '次数', 'shell 数', '插件数', '首现', '最近'], bodyRows)}`,
+      <p class="mb-4 text-sm text-slate-500">同一签名 = 同一类故障。次数即「全生态出现 N 次」的数据源；点击签名在右侧查看分布与样本。</p>
+      <div class="flex items-start gap-6">
+        <div class="min-w-0 flex-1">
+          ${table(['sig', 'category', '次数', 'shell 数', '插件数', '首现', '最近'], bodyRows)}
+        </div>
+        ${panel}
+      </div>`,
     }))
   } catch (err) {
     return errorPage(err)

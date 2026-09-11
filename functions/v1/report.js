@@ -41,7 +41,6 @@ async function sql(env, query) {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ query }),
-    signal: AbortSignal.timeout(8000),
   })
   const body = await res.json().catch(() => null)
   if (!res.ok || body?.error || body?.message) {

@@ -34,7 +34,6 @@ export async function onRequestGet({ request, env }) {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       body: JSON.stringify({ query }),
-      signal: AbortSignal.timeout(15000),
     })
     const body = await res.json().catch(() => null)
     if (!res.ok || !body?.rows) return json({ ok: false, error: body?.message ?? `HTTP ${res.status}` }, 502)

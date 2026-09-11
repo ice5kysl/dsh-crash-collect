@@ -1,0 +1,7 @@
+{
+  "name": "dsh-crash-collect",
+  "version": "0.1.0",
+  "private": true,
+  "description": "dsh-why crash-report ingestion endpoint on EdgeOne Pages Functions + KV",
+  "license": "MIT"
+}

@@ -38,9 +38,12 @@ function cleanString(v, re) {
   return typeof v === 'string' && re.test(v) ? v : null
 }
 
+const ALLOWED_KEYS = new Set(['v', 'sig', 'category', 'shell', 'plugin', 'plugin_ver', 'code', 'turns'])
+
 // 服务端再脱敏：只保留白名单字段，任何不合规字段使整个请求被拒
 function sanitize(body) {
   if (!body || typeof body !== 'object' || body.v !== 1) return null
+  if (Object.keys(body).some((k) => !ALLOWED_KEYS.has(k))) return null
   const out = {
     sig: cleanString(body.sig, RE_SIG),
     category: ALLOWED_CATEGORIES.has(body.category) ? body.category : 'other',

@@ -1,17 +1,72 @@
-// GET /admin/events — 生态事件时间线：按 occurred_at 倒序，按 type 过滤；?type=&key= 右侧抽屉看 payload
+// GET /admin/events — 生态事件时间线：按 occurred_at 倒序，按 type 过滤；?type=&key= 右侧抽屉
+// 平台类事件暖色 badge，插件类冷色；插件类事件列表行内/抽屉提取关键字段，原始 payload 折叠展示
 
 import { badge, drawer, esc, errorPage, field, guard, jsonBlock, layout, page, sql, table } from './_layout.js'
 
 const PAGE_SIZE = 50
 
 const TYPE_TONE = {
-  shell_release: 'indigo',
-  npm_publish: 'green',
+  shell_release: 'amber',
   platform_release: 'amber',
   api_model_first_seen: 'red',
+  npm_publish: 'green',
+  plugin_created: 'sky',
+  npm_first_publish: 'green',
+  plugin_release: 'indigo',
+  plugin_archived: 'slate',
 }
 
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`
+
+const parsePayload = (v) => {
+  if (typeof v === 'string') { try { return JSON.parse(v) } catch { /* 原样展示 */ } }
+  return v
+}
+
+const repoLink = (name) =>
+  `<a class="text-indigo-600 hover:underline" href="/admin/plugins?plugin=${encodeURIComponent(name)}">${esc(name)}</a>`
+
+// 列表行内摘要：从 payload 提取关键字段，免去逐条点抽屉
+function summary(type, p) {
+  if (!p || typeof p !== 'object') return esc(String(p ?? '').slice(0, 60))
+  switch (type) {
+    case 'plugin_created':
+      return `<span class="font-semibold">★ ${p.stars ?? 0}</span> · ${esc((p.description ?? '').slice(0, 48))}`
+    case 'npm_first_publish':
+      return `${esc(p.full_name ?? '')} <span class="text-slate-400">v${esc(p.version ?? '')}</span>`
+    case 'plugin_release':
+      return `<span class="font-mono">${esc(p.from ?? '—')} → ${esc(p.to ?? '—')}</span>`
+    case 'plugin_archived':
+      return esc(p.reason ?? '仓库归档')
+    default:
+      return esc(JSON.stringify(p).slice(0, 60))
+  }
+}
+
+// 抽屉里的友好字段区（按事件类型定制；原始 JSON 另放折叠区）
+function detailFields(type, key, p) {
+  if (!p || typeof p !== 'object') return ''
+  switch (type) {
+    case 'plugin_created':
+      return field('仓库', repoLink(key)) +
+        field('stars', `★ ${p.stars ?? 0}`) +
+        field('pkg_name', esc(p.pkgName ?? '—')) +
+        field('description', esc(p.description ?? '—')) +
+        field('topics', Array.isArray(p.topics) && p.topics.length ? p.topics.map((t) => badge(t)).join(' ') : '<span class="text-slate-300">—</span>')
+    case 'npm_first_publish':
+      return field('包名', esc(key)) +
+        (p.full_name ? field('仓库', repoLink(p.full_name)) : '') +
+        field('首个版本', esc(p.version ?? '—'))
+    case 'plugin_release':
+      return field('插件', esc(key)) +
+        field('版本变化', `<span class="font-mono">${esc(p.from ?? '—')} → ${esc(p.to ?? '—')}</span>`)
+    case 'plugin_archived':
+      return field('插件', esc(key)) +
+        field('原因', esc(p.reason ?? '仓库归档'))
+    default:
+      return ''
+  }
+}
 
 export async function onRequestGet(context) {
   const denied = guard(context)
@@ -41,11 +96,6 @@ export async function onRequestGet(context) {
     const qs = new URLSearchParams()
     if (type) qs.set('type', type)
 
-    const payloadPreview = (p) => {
-      const s = typeof p === 'string' ? p : JSON.stringify(p)
-      return esc((s ?? '').slice(0, 60))
-    }
-
     const bodyRows = rows.map((r) => {
       const on = selType === r[0] && selKey === r[1]
       return `<tr class="hover:bg-indigo-50 ${on ? 'bg-indigo-50' : ''}">
@@ -53,7 +103,7 @@ export async function onRequestGet(context) {
       <td class="px-4 py-2.5">${badge(r[0], TYPE_TONE[r[0]])}</td>
       <td class="px-4 py-2.5"><a class="font-mono text-xs text-indigo-600 hover:underline"
         href="/admin/events?${qs}&type=${encodeURIComponent(r[0])}&key=${encodeURIComponent(r[1])}">${esc(r[1])}</a></td>
-      <td class="max-w-96 truncate px-4 py-2.5 font-mono text-xs text-slate-400">${payloadPreview(r[3])}</td></tr>`
+      <td class="max-w-96 truncate px-4 py-2.5 text-xs text-slate-500">${summary(r[0], parsePayload(r[3]))}</td></tr>`
     }).join('')
 
     const typeOpts = `<option value="">全部类型</option>` +
@@ -69,8 +119,7 @@ export async function onRequestGet(context) {
                                    WHERE type = ${sqlStr(selType)} AND key = ${sqlStr(selKey)} LIMIT 1`)
       if (full.length) {
         const r = full[0]
-        let payload = r[4]
-        if (typeof payload === 'string') { try { payload = JSON.parse(payload) } catch { /* 原样展示 */ } }
+        const payload = parsePayload(r[4])
         panel = drawer(
           `事件 · ${esc(r[0])}`,
           `/admin/events?${qs}&page=${pageNum}`,
@@ -78,7 +127,11 @@ export async function onRequestGet(context) {
           field('key', esc(r[1])) +
           field('occurred_at', esc(String(r[2]).slice(0, 19))) +
           field('first_seen', esc(String(r[3]).slice(0, 19))) +
-          `<div class="p-4"><div class="mb-1 text-xs font-semibold text-slate-500">payload</div>${jsonBlock(payload)}</div>`,
+          detailFields(r[0], r[1], payload) +
+          `<div class="p-4"><details>
+            <summary class="cursor-pointer text-xs font-semibold text-slate-500">原始 payload（JSON）</summary>
+            <div class="mt-2">${jsonBlock(payload ?? null)}</div>
+          </details></div>`,
         )
       } else {
         panel = `<div class="w-96 shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">事件不存在。</div>`
@@ -97,7 +150,7 @@ export async function onRequestGet(context) {
       </form>
       <div class="flex items-start gap-6">
         <div class="min-w-0 flex-1">
-          ${table(['时间', '类型', 'key', 'payload 预览'], bodyRows)}
+          ${table(['时间', '类型', 'key', '摘要'], bodyRows)}
           <div class="mt-4 flex items-center justify-center gap-2">
             ${pageLink(pageNum - 1, '← 上一页', pageNum > 1)}
             <span class="text-sm text-slate-500">第 ${pageNum} / ${pages} 页</span>

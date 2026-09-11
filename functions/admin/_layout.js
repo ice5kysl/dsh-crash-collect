@@ -119,6 +119,7 @@ export const badge = (text, tone = 'slate') => {
     red: 'bg-red-100 text-red-700',
     amber: 'bg-amber-100 text-amber-700',
     green: 'bg-emerald-100 text-emerald-700',
+    sky: 'bg-sky-100 text-sky-700',
   }
   return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone] ?? tones.slate}">${esc(text)}</span>`
 }

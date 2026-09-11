@@ -7,7 +7,7 @@ import { esc, errorPage, guard, layout, page, sql } from './_layout.js'
 
 const PAGE_SIZE = 20
 const RE_TABLE = /^[a-z_][a-z0-9_]{0,62}$/
-const RE_CTID = /^\(\d+,\d+\)$/
+const RE_ROWKEY = /^[a-zA-Z0-9._:@/+-]{1,128}$/
 
 async function listTables(env) {
   return sql(env, `SELECT c.relname, c.reltuples::bigint
@@ -46,16 +46,27 @@ async function tableView(env, url, tableNames) {
   }
 
   const pageNum = Math.max(1, Number(url.searchParams.get('page')) || 1)
-  const ctid = url.searchParams.get('ctid')
+  const rowKey = url.searchParams.get('row') // 主键值（有 PK 时）或行序号（无 PK 时）
+
+  // db9 是 TiKV 底座，没有 ctid 等系统列：优先用主键定位行；无 PK 的表退化为 OFFSET 序号
+  const pkRows = await sql(env, `SELECT kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
+    WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public' AND tc.table_name = '${name}'
+    ORDER BY kcu.ordinal_position LIMIT 1`)
+  const pk = pkRows.length ? pkRows[0][0] : null
+  const orderCol = pk ?? '1'
 
   const [colRows, [count], data] = await Promise.all([
     sql(env, `SELECT column_name, data_type, is_nullable, column_default
       FROM information_schema.columns WHERE table_schema='public' AND table_name='${name}' ORDER BY ordinal_position`),
     sql(env, `SELECT count(*) FROM "${name}"`).then((r) => r[0]),
-    sql(env, `SELECT ctid::text, * FROM "${name}" ORDER BY ctid DESC LIMIT ${PAGE_SIZE} OFFSET ${(pageNum - 1) * PAGE_SIZE}`),
+    sql(env, `SELECT * FROM "${name}" ORDER BY ${orderCol} DESC LIMIT ${PAGE_SIZE} OFFSET ${(pageNum - 1) * PAGE_SIZE}`),
   ])
   const pages = Math.max(1, Math.ceil(count / PAGE_SIZE))
   const cols = colRows.map((c) => c[0])
+  const pkIdx = pk ? cols.indexOf(pk) : -1
   const baseQs = `name=${encodeURIComponent(name)}&page=${pageNum}`
 
   const structRows = colRows.map((c) => `<tr class="hover:bg-slate-50">
@@ -64,19 +75,26 @@ async function tableView(env, url, tableNames) {
     <td class="px-4 py-2">${c[2] === 'YES' ? 'NULL' : 'NOT NULL'}</td>
     <td class="px-4 py-2 font-mono text-xs text-slate-400">${esc(c[3] ?? '')}</td></tr>`).join('')
 
-  const dataRows = data.map((r) => `<tr class="hover:bg-indigo-50 ${ctid === r[0] ? 'bg-indigo-50' : ''}">
-    <td class="px-3 py-2"><a href="/admin/tables?${baseQs}&ctid=${encodeURIComponent(r[0])}"
+  const dataRows = data.map((r, i) => {
+    const key = pk ? String(r[pkIdx]) : String((pageNum - 1) * PAGE_SIZE + i)
+    return `<tr class="hover:bg-indigo-50 ${rowKey === key ? 'bg-indigo-50' : ''}">
+    <td class="px-3 py-2"><a href="/admin/tables?${baseQs}&row=${encodeURIComponent(key)}"
       class="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-indigo-600 hover:border-indigo-400" title="查看完整行">详情</a></td>
-    ${r.slice(1).map((v) => `<td class="max-w-48 truncate px-3 py-2 font-mono text-xs">${v == null ? '<span class="text-slate-300">NULL</span>' : esc(String(v).slice(0, 60))}</td>`).join('')}
-  </tr>`).join('')
+    ${r.map((v) => `<td class="max-w-48 truncate px-3 py-2 font-mono text-xs">${v == null ? '<span class="text-slate-300">NULL</span>' : esc(String(v).slice(0, 60))}</td>`).join('')}
+  </tr>` }).join('')
 
   const pageLink = (p, label, enabled) => enabled
     ? `<a href="/admin/tables?name=${encodeURIComponent(name)}&page=${p}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">${label}</a>`
     : `<span class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-300">${label}</span>`
 
   let panel = ''
-  if (ctid && RE_CTID.test(ctid)) {
-    const full = await sql(env, `SELECT * FROM "${name}" WHERE ctid = '${ctid}' LIMIT 1`)
+  if (rowKey && RE_ROWKEY.test(rowKey)) {
+    const whereRow = pk
+      ? `"${pk}" = '${rowKey}'`
+      : null // 无 PK：按排序后的 OFFSET 取行
+    const full = pk
+      ? await sql(env, `SELECT * FROM "${name}" WHERE ${whereRow} LIMIT 1`)
+      : await sql(env, `SELECT * FROM "${name}" ORDER BY ${orderCol} DESC LIMIT 1 OFFSET ${Number(rowKey) || 0}`)
     if (full.length) panel = rowPanel(name, cols, full[0], baseQs)
   }
 

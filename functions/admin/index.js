@@ -25,7 +25,7 @@ export async function onRequestGet(context) {
       <td class="px-4 py-2.5 text-slate-400">${esc(String(r[4]).slice(0, 16))}</td></tr>`).join('')
 
     const recentRows = recent.map((r) => `<tr class="hover:bg-slate-50">
-      <td class="px-4 py-2.5 text-slate-400">#${r[0]}</td>
+      <td class="px-4 py-2.5"><a class="text-indigo-600 hover:underline" href="/admin/reports?id=${r[0]}">#${r[0]}</a></td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(r[1])}</td>
       <td class="px-4 py-2.5">${badge(r[2])}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(r[3])}</td>

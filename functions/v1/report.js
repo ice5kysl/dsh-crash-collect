@@ -1,6 +1,9 @@
 // POST /v1/report — dsh-why 崩溃案例上报端点（opt-in，白名单脱敏）
 //
-// 隐私红线：只接收并存储下列白名单字段，其它字段一律丢弃。
+// 存储：db9 (serverless Postgres)，经 SQL-over-HTTP API 写入。
+// 环境变量：DB9_TOKEN（scoped API token）、DB9_SQL_URL（可选覆盖）。
+//
+// 隐私红线：只接收并存储下列白名单字段，其它字段一律拒绝。
 // 绝不接收用户消息、工具参数、文件路径、prompt、IP。
 
 const ALLOWED_CATEGORIES = new Set([
@@ -15,6 +18,7 @@ const RE_CODE = /^[A-Za-z0-9_.:-]{1,64}$/
 
 const DAILY_CAP = 20000
 const MAX_BODY_BYTES = 16384
+const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/wqxvoyf8yu05/sql'
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -27,11 +31,23 @@ function json(data, status = 200, extraHeaders = {}) {
   })
 }
 
-function kv() {
-  // KV 命名空间绑定变量名为 crash_kv；Pages 运行时将其暴露为全局变量
-  const ref = globalThis.crash_kv
-  if (!ref) throw new Error('KV binding crash_kv not configured')
-  return ref
+// db9 SQL API 只接受整串 query；所有入库字段都过了上面的严格正则
+// （不含引号、空格、反斜线），插值是安全的。turns 是整数。
+async function sql(env, query) {
+  const token = env && env.DB9_TOKEN
+  if (!token) throw new Error('DB9_TOKEN not configured')
+  const url = (env && env.DB9_SQL_URL) || DEFAULT_SQL_URL
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ query }),
+    signal: AbortSignal.timeout(8000),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.error || body?.message) {
+    throw new Error(body?.error ?? body?.message ?? `HTTP ${res.status}`)
+  }
+  return body
 }
 
 function cleanString(v, re) {
@@ -67,46 +83,7 @@ function sanitize(body) {
   return out
 }
 
-function dayKey(d = new Date()) {
-  return d.toISOString().slice(0, 10).replace(/-/g, '')
-}
-
-function rid() {
-  const bytes = new Uint8Array(8)
-  crypto.getRandomValues(bytes)
-  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-async function bumpCounter(store, key, delta = 1) {
-  // KV 为最终一致，计数是近似值——用于软限流和公开统计，精度足够
-  const cur = Number(await store.get(key)) || 0
-  await store.put(key, String(cur + delta))
-  return cur + delta
-}
-
-async function aggregate(store, report, now) {
-  const key = `agg_${report.sig}`
-  let agg
-  try {
-    agg = (await store.get(key, { type: 'json' })) || null
-  } catch {
-    agg = null
-  }
-  if (!agg || typeof agg !== 'object') {
-    agg = { n: 0, first: now, shells: {}, plugins: {}, categories: {} }
-  }
-  agg.n += 1
-  agg.last = now
-  agg.shells[report.shell] = (agg.shells[report.shell] || 0) + 1
-  if (report.plugin) {
-    const p = report.plugin_ver ? `${report.plugin}@${report.plugin_ver}` : report.plugin
-    agg.plugins[p] = (agg.plugins[p] || 0) + 1
-  }
-  agg.categories[report.category] = (agg.categories[report.category] || 0) + 1
-  await store.put(key, JSON.stringify(agg))
-}
-
-export async function onRequestPost({ request }) {
+export async function onRequestPost({ request, env }) {
   const len = Number(request.headers.get('content-length')) || 0
   if (len > MAX_BODY_BYTES) return json({ ok: false, error: 'body too large' }, 413)
 
@@ -120,24 +97,27 @@ export async function onRequestPost({ request }) {
   const report = sanitize(body)
   if (!report) return json({ ok: false, error: 'schema rejected' }, 400)
 
-  let store
   try {
-    store = kv()
-  } catch {
-    return json({ ok: false, error: 'storage not configured' }, 503)
+    const cap = await sql(env, "SELECT count(*) FROM reports WHERE created_at > now() - interval '24 hours'")
+    if (Number(cap.rows?.[0]?.[0] ?? 0) >= DAILY_CAP) {
+      return json({ ok: false, error: 'daily cap reached' }, 429)
+    }
+
+    const cols = ['sig', 'category', 'shell']
+    const vals = [`'${report.sig}'`, `'${report.category}'`, `'${report.shell}'`]
+    for (const k of ['plugin', 'plugin_ver', 'code']) {
+      if (report[k] != null) { cols.push(k); vals.push(`'${report[k]}'`) }
+    }
+    if (report.turns != null) { cols.push('turns'); vals.push(String(report.turns)) }
+    const inserted = await sql(
+      env,
+      `INSERT INTO reports (${cols.join(', ')}) VALUES (${vals.join(', ')}) RETURNING id`,
+    )
+    const id = inserted.rows?.[0]?.[0]
+    return json({ ok: true, id: id != null ? `r_${id}` : null })
+  } catch (err) {
+    return json({ ok: false, error: `storage unavailable: ${err?.message ?? err}` }, 503)
   }
-
-  const today = dayKey()
-  const used = await bumpCounter(store, `cap_${today}`)
-  if (used > DAILY_CAP) return json({ ok: false, error: 'daily cap reached' }, 429)
-
-  const id = `r_${today}_${rid()}`
-  report.ts = Date.now()
-  await store.put(id, JSON.stringify(report))
-  await bumpCounter(store, 'meta_total')
-  await aggregate(store, report, report.ts)
-
-  return json({ ok: true, id })
 }
 
 export function onRequestGet() {

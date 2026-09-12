@@ -1,8 +1,9 @@
 // 本地开发服务器：零依赖，把 functions/ 里的 EdgeOne Pages Functions 跑在本地。
 //
-//   DB9_TOKEN=xxx EXPORT_KEY=dsh ADMIN_KEY=dsh node scripts/dev.mjs [port]
+//   DB9_TOKEN=xxx EXPORT_KEY=dsh ADMIN_KEY=dsh SEED_KEY=dsh-seed node scripts/dev.mjs [port]
 //
 // 然后访问 http://localhost:8787/admin （Basic Auth: 任意用户名 / $ADMIN_KEY）
+// SEED_KEY 用于本地验证 x-seed-key → source=seed 的种子通道。
 
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -33,6 +34,7 @@ const env = {
   DB9_SQL_URL: process.env.DB9_SQL_URL,
   EXPORT_KEY: process.env.EXPORT_KEY,
   ADMIN_KEY: process.env.ADMIN_KEY,
+  SEED_KEY: process.env.SEED_KEY,
 }
 
 createServer(async (req, res) => {

@@ -12,16 +12,20 @@
  *   - sig 一律由 dsh-why lib/share.mjs 的 findingSig 产出（经 buildSharePayloads），
  *     本脚本绝不重新实现签名逻辑；
  *   - payload 一律过 buildSharePayloads（收集端协议 v1 白名单）；
- *   - 只 POST，绝不改动已有行（包括 id=3 的第一条真实上报）。
+ *   - 只 POST，绝不改动已有行（包括 id=3 的第一条真实上报）；
+ *   - 必须带 SEED_KEY：请求头 x-seed-key 与收集端环境变量 SEED_KEY 一致时才落库
+ *     为 source='seed'。没有 SEED_KEY 就直接退出——种子绝不允许以 organic（用户
+ *     上报）身份入库，那是 2026-09 首跑污染 151 条统计的根因。
  *
  * 幂等：开跑前 SELECT sig FROM reports 取出已存在的签名集合，同 sig 跳过；
  * 批次内同样按 sig 去重（1 案例 = 1 计数）。重跑只会补上新增的案例。
  *
  * 用法：
- *   DB9_TOKEN=<readonly token> node scripts/seed-corpus.mjs [--dry-run] [--cap=150]
+ *   DB9_TOKEN=<readonly token> SEED_KEY=<收集端 SEED_KEY> node scripts/seed-corpus.mjs [--dry-run] [--cap=150]
  *
  * 环境变量：
  *   DB9_TOKEN        必填，db9 只读 token（读 compat_observations 与现有 sig 集合）
+ *   SEED_KEY         必填，与收集端 Pages 环境变量 SEED_KEY 一致，用于标记 source=seed
  *   DB9_SQL_URL      可选，覆盖 db9 SQL API 地址
  *   SEED_ENDPOINT    可选，覆盖上报端点（默认 https://api.dsh-why.com/v1/report）
  *   DSH_WHY_REPO     可选，dsh-why 仓库路径（默认 ../../dsh-why，即并排克隆）
@@ -34,6 +38,7 @@ const CAP_DEFAULT = 150
 const DB9_SQL_URL = process.env.DB9_SQL_URL ?? 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
 const ENDPOINT = process.env.SEED_ENDPOINT ?? 'https://api.dsh-why.com/v1/report'
 const TOKEN = process.env.DB9_TOKEN
+const SEED_KEY = process.env.SEED_KEY
 
 const args = new Set(process.argv.slice(2))
 const DRY_RUN = args.has('--dry-run')
@@ -51,6 +56,7 @@ function die(msg) {
 }
 
 if (!TOKEN) die('DB9_TOKEN 未配置（只读 token 即可，用于读 compat_observations 与现有 sig 集合）')
+if (!SEED_KEY) die('SEED_KEY 未配置——种子必须以 source=seed 入库；缺少它宁可不上报，也不污染用户上报口径')
 if (!Number.isInteger(CAP) || CAP < 1) die(`--cap 非法：${capArg}`)
 
 const dshWhyRepo = process.env.DSH_WHY_REPO ?? new URL('../../dsh-why', import.meta.url).pathname
@@ -85,7 +91,7 @@ function crashFinding(report, spec) {
 }
 
 async function main() {
-  console.log(`[seed] endpoint: ${ENDPOINT} · cap: ${CAP}${DRY_RUN ? ' · DRY-RUN（不发请求）' : ''}`)
+  console.log(`[seed] endpoint: ${ENDPOINT} · cap: ${CAP} · source=seed（x-seed-key 标记）${DRY_RUN ? ' · DRY-RUN（不发请求）' : ''}`)
 
   // 1) 实测观察：每个包最新 version 里的未守护 require
   const obs = await sql(
@@ -174,7 +180,8 @@ async function main() {
   }
   console.log(`[seed] 待上报 ${payloads.length} 条（按同 spec 插件数排序，cap ${CAP}）；跳过：判不出崩溃 ${skipped.noFinding.length} · sig 重复 ${skipped.dup.length} · 白名单 ${skipped.invalid.length}`)
 
-  // 5) 真实 POST（顺带压测收集端；限流 20000/24h 远不会触发）
+  // 5) 真实 POST（顺带压测收集端；限流 20000/24h 远不会触发）。
+  //    x-seed-key 头让收集端把来源判为 seed，与用户上报彻底分开。
   let ok = 0
   let failed = 0
   for (const { payload, spec } of payloads) {
@@ -186,7 +193,11 @@ async function main() {
     try {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'user-agent': 'dsh-crash-collect seed-corpus' },
+        headers: {
+          'content-type': 'application/json',
+          'user-agent': 'dsh-crash-collect seed-corpus',
+          'x-seed-key': SEED_KEY,
+        },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10_000),
       })

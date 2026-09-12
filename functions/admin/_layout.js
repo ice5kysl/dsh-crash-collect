@@ -124,6 +124,10 @@ export const badge = (text, tone = 'slate') => {
   return `<span class="inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones[tone] ?? tones.slate}">${esc(text)}</span>`
 }
 
+// 来源徽章：organic = 真实用户上报（绿），seed = 冷启动种子（琥珀，机器灌入）
+export const sourceBadge = (source) =>
+  source === 'seed' ? badge('种子', 'amber') : badge('用户', 'green')
+
 // 右侧抽屉（sticky aside）：全站详情统一走这里。width 按内容定（默认 w-[42rem]），
 // max-w-[90vw] 保证窄屏不溢出
 export const drawer = (title, closeHref, bodyHtml, width = 'w-[42rem]') => `

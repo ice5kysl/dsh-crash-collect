@@ -27,7 +27,7 @@ export async function onRequestGet({ request, env }) {
   const limit = Math.min(Number(url.searchParams.get('limit')) || 5000, MAX_LIMIT)
 
   const where = since ? `WHERE created_at >= '${since}'::timestamptz` : ''
-  const query = `SELECT id, sig, category, shell, plugin, plugin_ver, code, turns, created_at FROM reports ${where} ORDER BY id LIMIT ${limit}`
+  const query = `SELECT id, sig, category, shell, plugin, plugin_ver, code, turns, created_at, source FROM reports ${where} ORDER BY id LIMIT ${limit}`
 
   try {
     const res = await fetch((env && env.DB9_SQL_URL) || DEFAULT_SQL_URL, {
@@ -41,7 +41,7 @@ export async function onRequestGet({ request, env }) {
     const lines = body.rows.map((r) => JSON.stringify({
       id: `r_${r[0]}`, sig: r[1], category: r[2], shell: r[3],
       plugin: r[4] ?? undefined, plugin_ver: r[5] ?? undefined,
-      code: r[6] ?? undefined, turns: r[7] ?? undefined, ts: r[8],
+      code: r[6] ?? undefined, turns: r[7] ?? undefined, ts: r[8], source: r[9],
     }))
     return new Response(lines.join('\n') + (lines.length ? '\n' : ''), {
       headers: { 'content-type': 'application/x-ndjson; charset=UTF-8' },

@@ -5,6 +5,9 @@
 //
 // 隐私红线：只接收并存储下列白名单字段，其它字段一律拒绝。
 // 绝不接收用户消息、工具参数、文件路径、prompt、IP。
+//
+// source 列（organic/seed）由服务端判定，不是可上报的 payload 字段：
+// 见 reportSource()，只有 SEED_KEY 匹配的请求才会被标记为种子。
 
 const ALLOWED_CATEGORIES = new Set([
   'provider-auth', 'provider-quota', 'tool-cancelled', 'compaction-overflow',
@@ -19,6 +22,15 @@ const RE_CODE = /^[A-Za-z0-9_.:-]{1,64}$/
 const DAILY_CAP = 20000
 const MAX_BODY_BYTES = 16384
 const DEFAULT_SQL_URL = 'https://api.db9.ai/customer/databases/toc6zdt4vd7j/sql'
+
+// 来源标记：缺省 'organic'（真实用户 --share 上报）。只有请求头 x-seed-key 与
+// 环境变量 SEED_KEY 完全一致时才记为 'seed'（scripts/seed-corpus.mjs 的冷启动
+// 种子）。未配置 SEED_KEY 时该头被忽略——种子永远不会被误记成用户上报。
+function reportSource(request, env) {
+  const key = env && env.SEED_KEY
+  if (!key) return 'organic'
+  return request.headers.get('x-seed-key') === key ? 'seed' : 'organic'
+}
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
@@ -102,8 +114,8 @@ export async function onRequestPost({ request, env }) {
       return json({ ok: false, error: 'daily cap reached' }, 429)
     }
 
-    const cols = ['sig', 'category', 'shell']
-    const vals = [`'${report.sig}'`, `'${report.category}'`, `'${report.shell}'`]
+    const cols = ['sig', 'category', 'shell', 'source']
+    const vals = [`'${report.sig}'`, `'${report.category}'`, `'${report.shell}'`, `'${reportSource(request, env)}'`]
     for (const k of ['plugin', 'plugin_ver', 'code']) {
       if (report[k] != null) { cols.push(k); vals.push(`'${report[k]}'`) }
     }

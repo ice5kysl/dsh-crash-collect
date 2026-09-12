@@ -80,4 +80,25 @@ curl 'https://api.dsh-why.com/v1/export?key=<EXPORT_KEY>&limit=100'
 
 dsh-insights pipeline 每日查库（或调 `/v1/export`），按 `sig` 聚合进
 `data/crash-corpus.json`；dsh-why 诊断时经 `lib/net.mjs` 拉取，
-失败回落包内快照（读路径与 compat-observed 同构）。
+拉不到就静默不显示（读路径与 compat-observed 同构，绝不阻塞诊断）。
+
+## 冷启动种子（scripts/seed-corpus.mjs）
+
+一次性运维工具：用 db9 `compat_observations` 表里的**实测**观察（真实发布包里
+未守护的 require）给语料库灌种子，解决"收集端刚上线、语料为空"的冷启动。
+
+- 每个 (插件, spec) 都交给 dsh-why 自己的诊断管线审判（构造加载器报错文本走
+  `--error` 离线诊断），只有真的产出 R1 error finding 的案例才入库——判不出会崩
+  的一律跳过，不灌虚构数据。
+- sig 一律由 dsh-why `lib/share.mjs` 的 `findingSig` 产出、payload 一律过
+  `buildSharePayloads`，脚本不重新实现签名逻辑。
+- **幂等**：开跑前 `SELECT sig FROM reports` 取已存在签名集合，同 sig 跳过
+  （批次内同样去重，1 案例 = 1 计数）；只 INSERT，永不改动已有行。重跑安全。
+- 默认 cap 150 条，按"同 spec 的插件数"排序优先常见的雷。
+
+```bash
+DB9_TOKEN=<readonly token> node scripts/seed-corpus.mjs [--dry-run] [--cap=150]
+# 可选：DSH_WHY_REPO（dsh-why 仓库路径，默认 ../../dsh-why）
+# 可选：DSH_WHY_NPM_ROOT（dsh 全局安装的 npm root，判定基准 shell 取自它）
+# 可选：SEED_ENDPOINT（覆盖上报端点，默认 https://api.dsh-why.com/v1/report）
+```

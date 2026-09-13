@@ -1,10 +1,13 @@
 // GET /admin/plugins — 插件库：搜索/过滤/排序/分页；?plugin=<full_name> 右侧抽屉
-// 抽屉内容：完整信息 + 近 30 天分数历史 + 周下载 + LLM 标注 + 兼容观察
+// 抽屉内容：完整信息 + 分数趋势图（近 30 天，涨跌指示）+ 下载趋势图（近 12 周）+
+// 事件时间线 + 崩溃上报 + LLM 标注 + 兼容观察。图表为纯 CSS 柱状图，无 JS 依赖。
 
 import { badge, drawer, esc, errorPage, field, guard, layout, page, sql, table } from './_layout.js'
+import { TYPE_TONE, parsePayload, summary as eventSummary } from './events.js'
 
 const PAGE_SIZE = 30
 const SCORE_DAYS = 30
+const DL_WEEKS = 12
 
 const SORTS = {
   stars: ['stars', 'p.stars DESC'],
@@ -13,29 +16,80 @@ const SORTS = {
 }
 
 const GRADE_TONE = { S: 'green', A: 'green', B: 'indigo', C: 'amber', D: 'red' }
+const GRADE_BAR = { S: 'bg-emerald-500', A: 'bg-emerald-400', B: 'bg-indigo-500', C: 'bg-amber-400', D: 'bg-red-400' }
 
 // 值入库前统一转义单引号；grade/category/sort 再与库内实际取值比对（双保险）
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`
+const likeStr = (v) => sqlStr(String(v).replace(/[%_\\]/g, (m) => `\\${m}`))
+
+// 单个查询失败/空结果 → 空数组（该区块显示空态，不拖垮整个抽屉）
+const safe = (p) => p.catch(() => [])
+
+const fmtDay = (d) => String(d ?? '').slice(0, 10)
+
+// 分数趋势：每天一根柱（高=score，色=grade 分档），柱下 ↑↓ 为相对前一天涨跌
+function scoreChart(scores) {
+  const rows = [...scores].reverse() // DESC → ASC
+  const bars = rows.map((r, i) => {
+    const cur = Number(r[1])
+    const prev = i > 0 ? Number(rows[i - 1][1]) : null
+    const delta = prev == null ? '' : cur > prev ? '↑' : cur < prev ? '↓' : '·'
+    const tone = prev == null || cur === prev ? 'text-slate-300' : cur > prev ? 'text-emerald-500' : 'text-red-400'
+    const h = Math.max(2, Math.round((cur / 100) * 88))
+    return `<div class="flex min-w-0 flex-1 flex-col items-center justify-end gap-0.5"
+      title="${esc(fmtDay(r[0]))} · ${cur} 分 ${esc(r[2] ?? '')}${prev == null ? '' : `（较前一天 ${delta === '↑' ? '+' : delta === '↓' ? '−' : '±'}${Math.abs(cur - prev)}）`}">
+      <div class="w-full rounded-sm ${GRADE_BAR[r[2]] ?? 'bg-slate-300'}" style="height:${h}px"></div>
+      <div class="text-[10px] leading-none ${tone}">${delta}</div>
+    </div>`
+  }).join('')
+  return `<div class="flex h-28 items-end gap-px">${bars}</div>
+    <div class="mt-1 flex justify-between text-[10px] text-slate-400">
+      <span>${esc(fmtDay(rows[0][0]))}</span><span>${rows.length} 天</span><span>${esc(fmtDay(rows[rows.length - 1][0]))}</span>
+    </div>`
+}
+
+// 下载趋势：每周一根柱（高按窗口内最大值归一），柱上标值、柱下标周起始
+function dlChart(downloads) {
+  const rows = [...downloads].reverse()
+  const max = rows.reduce((m, r) => Math.max(m, Number(r[1]) || 0), 0)
+  const bars = rows.map((r) => {
+    const v = Number(r[1]) || 0
+    const h = max > 0 ? Math.max(2, Math.round((v / max) * 88)) : 2
+    return `<div class="flex min-w-0 flex-1 flex-col items-center justify-end gap-0.5" title="${esc(fmtDay(r[0]))} 起一周 · ${v.toLocaleString('en-US')} 下载">
+      <div class="text-[10px] font-semibold leading-none text-slate-600">${v.toLocaleString('en-US')}</div>
+      <div class="w-full rounded-sm bg-indigo-400" style="height:${h}px"></div>
+      <div class="text-[10px] leading-none text-slate-400">${esc(fmtDay(r[0]).slice(5))}</div>
+    </div>`
+  }).join('')
+  return `<div class="flex h-28 items-end gap-1">${bars}</div>`
+}
 
 async function pluginDrawer(env, fullName, backQs) {
-  const [plugin, scores, downloads, tags] = await Promise.all([
+  const fn = sqlStr(fullName)
+  const fnLike = likeStr(`${fullName}@%`)
+  const pkgSub = `(SELECT pkg_name FROM plugins WHERE full_name = ${fn})`
+  // 8 条查询全部并行；除插件本身外都过 safe()，单点失败只影响对应区块
+  const [plugin, scores, downloads, tags, events, [reportCount], reports, compat] = await Promise.all([
     sql(env, `SELECT full_name, owner, repo, kind, pkg_name, version, description, license, stars, forks, score, grade, category, in_awesome, covered, pushed_at, html_url
-              FROM plugins WHERE full_name = ${sqlStr(fullName)} LIMIT 1`).then((r) => r[0]),
-    sql(env, `SELECT date, score, grade FROM plugin_scores
-              WHERE full_name = ${sqlStr(fullName)} AND date > current_date - interval '${SCORE_DAYS} days'
-              ORDER BY date DESC LIMIT 15`),
-    sql(env, `SELECT week_start, downloads FROM plugin_downloads
-              WHERE pkg_name = (SELECT pkg_name FROM plugins WHERE full_name = ${sqlStr(fullName)})
-              ORDER BY week_start DESC LIMIT 8`),
-    sql(env, `SELECT category, capability_tags, summary_zh, confidence, model, tagged_at
-              FROM plugin_llm_tags WHERE full_name = ${sqlStr(fullName)} LIMIT 1`).then((r) => r[0]),
+              FROM plugins WHERE full_name = ${fn} LIMIT 1`).then((r) => r[0]),
+    safe(sql(env, `SELECT date, score, grade FROM plugin_scores
+              WHERE full_name = ${fn} AND date > current_date - interval '${SCORE_DAYS} days'
+              ORDER BY date DESC LIMIT ${SCORE_DAYS}`)),
+    safe(sql(env, `SELECT week_start, downloads FROM plugin_downloads
+              WHERE pkg_name = ${pkgSub} ORDER BY week_start DESC LIMIT ${DL_WEEKS}`)),
+    safe(sql(env, `SELECT category, capability_tags, summary_zh, confidence, model, tagged_at
+              FROM plugin_llm_tags WHERE full_name = ${fn} LIMIT 1`)).then((r) => r[0]),
+    // 插件级事件：key = full_name / full_name@*（plugin_created/release/archived），
+    // 加上 key = pkg_name 的 npm_first_publish
+    safe(sql(env, `SELECT type, key, occurred_at, payload FROM ecosystem_events
+              WHERE key = ${fn} OR key LIKE ${fnLike} ESCAPE '\\' OR (type = 'npm_first_publish' AND key = ${pkgSub})
+              ORDER BY occurred_at DESC LIMIT 20`)),
+    safe(sql(env, `SELECT count(*) FROM reports WHERE plugin = ${pkgSub}`)).then((r) => r[0] ?? [0]),
+    safe(sql(env, `SELECT sig, category, created_at FROM reports WHERE plugin = ${pkgSub} ORDER BY id DESC LIMIT 5`)),
+    safe(sql(env, `SELECT version, client, observed_at FROM compat_observations
+              WHERE pkg_name = ${pkgSub} ORDER BY observed_at DESC LIMIT 5`)),
   ])
   if (!plugin) return `<div class="w-[42rem] max-w-[90vw] shrink-0 rounded-xl border border-slate-200 bg-white p-5 text-sm text-slate-500 shadow-sm">插件 ${esc(fullName)} 不存在。</div>`
-
-  const compat = plugin[4]
-    ? await sql(env, `SELECT version, client, observed_at FROM compat_observations
-                      WHERE pkg_name = ${sqlStr(plugin[4])} ORDER BY observed_at DESC LIMIT 5`)
-    : []
 
   const yn = (v) => (v ? badge('是', 'green') : '<span class="text-slate-300">—</span>')
   const info = [
@@ -53,13 +107,25 @@ async function pluginDrawer(env, fullName, backQs) {
   ].map(([k, v]) => field(k, v)).join('')
 
   const scoreRows = scores.map((s) => `<tr>
-    <td class="px-3 py-1.5 font-mono text-xs">${esc(String(s[0]).slice(0, 10))}</td>
+    <td class="px-3 py-1.5 font-mono text-xs">${esc(fmtDay(s[0]))}</td>
     <td class="px-3 py-1.5 text-right font-semibold">${s[1]}</td>
     <td class="px-3 py-1.5">${badge(s[2], GRADE_TONE[s[2]])}</td></tr>`).join('')
 
   const dlRows = downloads.map((d) => `<tr>
-    <td class="px-3 py-1.5 font-mono text-xs">${esc(String(d[0]).slice(0, 10))}</td>
+    <td class="px-3 py-1.5 font-mono text-xs">${esc(fmtDay(d[0]))}</td>
     <td class="px-3 py-1.5 text-right font-semibold">${d[1]}</td></tr>`).join('')
+
+  const eventRows = events.map((e) => `<div class="flex items-baseline gap-2 py-1">
+    <span class="w-16 shrink-0 font-mono text-xs text-slate-400">${esc(fmtDay(e[2]))}</span>
+    <span class="shrink-0">${badge(e[0], TYPE_TONE[e[0]])}</span>
+    <span class="min-w-0 truncate text-xs text-slate-600">${eventSummary(e[0], parsePayload(e[3]))}</span>
+  </div>`).join('')
+
+  const reportRows = reports.map((r) => `<div class="flex items-baseline gap-2 py-1">
+    <span class="w-16 shrink-0 font-mono text-xs text-slate-400">${esc(String(r[2]).slice(5, 16))}</span>
+    <a class="min-w-0 truncate font-mono text-xs text-indigo-600 hover:underline" href="/admin/reports?sig=${encodeURIComponent(r[0])}">${esc(r[0])}</a>
+    <span class="shrink-0">${badge(r[1])}</span>
+  </div>`).join('')
 
   const llm = tags
     ? field('LLM 分类 / 置信度', `${esc(tags[0] ?? '—')} · ${tags[3] ?? '—'}`) +
@@ -71,28 +137,35 @@ async function pluginDrawer(env, fullName, backQs) {
   const compatRows = compat.map((c) => `<tr>
     <td class="px-3 py-1.5 font-mono text-xs">${esc(c[0] ?? '')}</td>
     <td class="px-3 py-1.5 font-mono text-xs">${esc(c[1] ?? '')}</td>
-    <td class="px-3 py-1.5 text-xs text-slate-400">${esc(String(c[2]).slice(0, 10))}</td></tr>`).join('')
+    <td class="px-3 py-1.5 text-xs text-slate-400">${esc(fmtDay(c[2]))}</td></tr>`).join('')
 
+  const empty = (t) => `<div class="text-xs text-slate-400">${t}</div>`
   const section = (title, inner) => `
     <div class="border-b border-slate-100 p-4">
       <div class="mb-2 text-xs font-semibold text-slate-500">${title}</div>
       ${inner}
     </div>`
+  const detailTable = (label, rowsHtml) => `<details class="mt-2">
+      <summary class="cursor-pointer text-xs text-slate-400 hover:text-slate-600">${label}</summary>
+      <table class="mt-1 min-w-full text-sm"><tbody class="divide-y divide-slate-100">${rowsHtml}</tbody></table>
+    </details>`
 
   return drawer(
     `插件 · ${esc(fullName)}`,
     `/admin/plugins?${backQs}`,
     info +
-    section(`分数历史（近 ${SCORE_DAYS} 天）`, scoreRows
-      ? `<table class="min-w-full text-sm"><tbody class="divide-y divide-slate-100">${scoreRows}</tbody></table>`
-      : '<div class="text-xs text-slate-400">暂无记录</div>') +
-    section('周下载（最近 8 周）', dlRows
-      ? `<table class="min-w-full text-sm"><tbody class="divide-y divide-slate-100">${dlRows}</tbody></table>`
-      : '<div class="text-xs text-slate-400">暂无记录</div>') +
+    section(`分数趋势（近 ${SCORE_DAYS} 天）`, scores.length
+      ? scoreChart(scores) + detailTable('明细表格', scoreRows)
+      : empty('暂无分数历史')) +
+    section(`下载趋势（近 ${DL_WEEKS} 周）`, downloads.length
+      ? dlChart(downloads) + detailTable('明细表格', dlRows)
+      : empty('暂无下载数据')) +
+    section('事件时间线', eventRows || empty('暂无插件级事件')) +
+    section(`崩溃上报（共 ${reportCount ?? 0} 条）`, reportRows || empty('暂无崩溃上报')) +
     section('LLM 标注', `<div class="-mx-4">${llm}</div>`) +
-    section(`兼容观察（按 pkg_name 关联，最近 5 条）`, compatRows
+    section('兼容观察（按 pkg_name 关联，最近 5 条）', compatRows
       ? `<table class="min-w-full text-sm"><tbody class="divide-y divide-slate-100">${compatRows}</tbody></table>`
-      : '<div class="text-xs text-slate-400">暂无记录</div>'),
+      : empty('暂无记录')),
   )
 }
 

@@ -5,7 +5,7 @@ import { badge, drawer, esc, errorPage, field, guard, jsonBlock, layout, page, s
 
 const PAGE_SIZE = 50
 
-const TYPE_TONE = {
+export const TYPE_TONE = {
   shell_release: 'amber',
   platform_release: 'amber',
   api_model_first_seen: 'red',
@@ -18,7 +18,7 @@ const TYPE_TONE = {
 
 const sqlStr = (v) => `'${String(v).replace(/'/g, "''")}'`
 
-const parsePayload = (v) => {
+export const parsePayload = (v) => {
   if (typeof v === 'string') { try { return JSON.parse(v) } catch { /* 原样展示 */ } }
   return v
 }
@@ -26,8 +26,8 @@ const parsePayload = (v) => {
 const repoLink = (name) =>
   `<a class="text-indigo-600 hover:underline" href="/admin/plugins?plugin=${encodeURIComponent(name)}">${esc(name)}</a>`
 
-// 列表行内摘要：从 payload 提取关键字段，免去逐条点抽屉
-function summary(type, p) {
+// 列表行内摘要：从 payload 提取关键字段，免去逐条点抽屉（plugins 抽屉的事件时间线也复用）
+export function summary(type, p) {
   if (!p || typeof p !== 'object') return esc(String(p ?? '').slice(0, 60))
   switch (type) {
     case 'plugin_created':

@@ -41,6 +41,7 @@ const NAV = [
   { href: '/admin', key: 'overview', label: '总览', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
   { href: '/admin/reports', key: 'reports', label: '上报明细', icon: 'M4 6h16M4 12h16M4 18h10' },
   { href: '/admin/signatures', key: 'signatures', label: '签名分析', icon: 'M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6' },
+  { href: '/admin/traffic', key: 'traffic', label: '站点访问', icon: 'M3 17l6-6 4 4 8-8M21 7v5h-5' },
   { group: '生态数据' },
   { href: '/admin/plugins', key: 'plugins', label: '插件', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
   { href: '/admin/events', key: 'events', label: '事件', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },

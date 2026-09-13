@@ -37,11 +37,12 @@ export async function sql(env, query) {
 export const RE_FILTER = /^[a-z0-9@/._+-]{1,128}$/i
 
 const NAV = [
-  { group: '崩溃收集' },
   { href: '/admin', key: 'overview', label: '总览', icon: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10' },
+  { group: '崩溃收集' },
   { href: '/admin/reports', key: 'reports', label: '上报明细', icon: 'M4 6h16M4 12h16M4 18h10' },
   { href: '/admin/signatures', key: 'signatures', label: '签名分析', icon: 'M4 19V5m0 14h16M8 15v-4m4 4V8m4 7v-6' },
-  { href: '/admin/traffic', key: 'traffic', label: '站点访问', icon: 'M3 17l6-6 4 4 8-8M21 7v5h-5' },
+  { group: '站点访问' },
+  { href: '/admin/traffic', key: 'traffic', label: '流量分析', icon: 'M3 17l6-6 4 4 8-8M21 7v5h-5' },
   { group: '生态数据' },
   { href: '/admin/plugins', key: 'plugins', label: '插件', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4' },
   { href: '/admin/events', key: 'events', label: '事件', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
@@ -64,15 +65,15 @@ export function layout({ title, active, content }) {
   return `<!doctype html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title} · dsh-crash admin</title>
+<title>${title} · dsh-data admin</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-100 text-slate-800 antialiased">
 <div class="flex min-h-screen">
   <aside class="fixed inset-y-0 left-0 flex w-60 flex-col bg-slate-900 px-4 py-6">
     <div class="mb-8 px-2">
-      <div class="text-lg font-bold text-white">dsh-crash</div>
-      <div class="text-xs text-slate-400">崩溃案例库管理后台</div>
+      <div class="text-lg font-bold text-white">dsh-data</div>
+      <div class="text-xs text-slate-400">生态数据管理后台</div>
     </div>
     <nav class="flex flex-col gap-1">${nav}</nav>
     <div class="mt-auto space-y-2 px-2 text-xs text-slate-500">

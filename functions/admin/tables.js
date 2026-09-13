@@ -4,8 +4,9 @@
 // 行定位：db9 是 TiKV 底座，没有 ctid —— 优先用主键，无 PK 的表退化为 OFFSET 序号。
 // 深链：?table=plugins&tab=data&page=2&row=<pk>
 //
-// 行数：pg_class.reltuples 恒为 -1、pg_stat_user_tables.n_live_tup 恒为 0（TiKV 不维护统计），
-// 故对每张表并行 count(*)（10 张表 ~2s），页面展示的是精确值。
+// 行数：精确 count(*)（限流并行 + 重试）；个别大表（plugin_scores ~5.7 万行）count 会撞 db9
+// 上游 ~15s 超时，退 pg_class.reltuples 估算（标 ≈；TiKV 不自动维护统计，靠 ANALYZE 刷新）。
+// pg_stat_user_tables.n_live_tup 恒为 0，不可用。
 // 体积：pg_total_relation_size / pg_relation_size / pg_table_size 均报 function does not exist，
 // information_schema.tables 没有 data_length 列 —— TiKV 兼容层都不支持，只能显示 "—"。
 
@@ -19,20 +20,50 @@ const TABS = [
   ['data', '数据'],
 ]
 
-// 10 条 count(*) 并行 ~10s（db9 HTTP 端并发受限），合成 UNION ALL 又会触发 TiKV
-// transaction memory limit —— 只能逐条并行，加 2 分钟模块级缓存摊薄后续访问
+// count(*) 逐条并行（限 4 路，db9 HTTP 端并发高了会 504/空 rows）+ 失败重试一次；
+// reltuples 估算超 EXACT_COUNT_MAX 的表跳过精确计数（count 必撞 db9 上游 ~15s 超时，
+// 白白卡页面 30s），直接用估算（标 ≈，需 ANALYZE 过才有值，否则 -1 → "—"）。
+// 合成 UNION ALL 会触发 TiKV transaction memory limit，不可用。
+// 每行都有值（精确或估算）即进 2 分钟模块级缓存
 let tablesCache = null
 const TABLES_CACHE_TTL = 120_000
+const EXACT_COUNT_MAX = 30_000
+
+async function mapPool(items, fn, size = 4) {
+  const out = new Array(items.length)
+  let i = 0
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
+    while (i < items.length) {
+      const cur = i++
+      out[cur] = await fn(items[cur])
+    }
+  }))
+  return out
+}
 
 async function listTables(env) {
   if (tablesCache && Date.now() - tablesCache.at < TABLES_CACHE_TTL) return tablesCache.tables
-  const names = (await sql(env, `SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name`)).map((r) => r[0])
-  const counts = await Promise.all(
-    names.map((n) => sql(env, `SELECT count(*) FROM "${n}"`).then((r) => Number(r[0][0]))),
-  )
-  const tables = names.map((n, i) => [n, counts[i]])
-  tablesCache = { at: Date.now(), tables }
+  const base = await sql(env, `SELECT c.relname, c.reltuples::bigint
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname`)
+  const countOne = async (n) => {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const r = await sql(env, `SELECT count(*) FROM "${n}"`)
+        if (r.length) return Number(r[0][0])
+      } catch { /* 重试一次 */ }
+    }
+    return null
+  }
+  const heavy = base.map((t) => Number(t[1]) > EXACT_COUNT_MAX)
+  const counts = await mapPool(base.map((t, i) => (heavy[i] ? null : t[0])), (n) => (n ? countOne(n) : null))
+  // [name, rows|null, estimated]
+  const tables = base.map((t, i) => {
+    if (counts[i] != null) return [t[0], counts[i], false]
+    const est = Number(t[1])
+    return [t[0], est >= 0 ? est : null, true]
+  })
+  if (tables.every((t) => t[1] != null)) tablesCache = { at: Date.now(), tables }
   return tables
 }
 
@@ -42,7 +73,7 @@ function tableList(tables, active) {
     return `<a href="/admin/tables?table=${encodeURIComponent(t[0])}"
       class="rounded-lg px-3 py-1.5 transition ${on ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-200/70'}">
       <span class="block truncate font-mono text-xs">${esc(t[0])}</span>
-      <span class="mt-0.5 block text-xs ${on ? 'text-indigo-200' : 'text-slate-400'}">${t[1].toLocaleString()} 行 · —</span></a>`
+      <span class="mt-0.5 block text-xs ${on ? 'text-indigo-200' : 'text-slate-400'}">${t[1] == null ? '—' : `${t[2] ? '≈' : ''}${t[1].toLocaleString()}`} 行 · —</span></a>`
   }).join('')
   return `
   <div class="sticky top-8 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
@@ -186,7 +217,7 @@ export async function onRequestGet(context) {
       title: '表浏览',
       active: 'tables',
       content: `
-      <p class="mb-4 text-sm text-slate-500">db9 库 <code class="rounded bg-slate-200 px-1.5 py-0.5 text-xs">dsh-data</code>（public schema，只读视图；行数为精确 count(*)，缓存 2 分钟；体积 TiKV 兼容层暂不支持）</p>
+      <p class="mb-4 text-sm text-slate-500">db9 库 <code class="rounded bg-slate-200 px-1.5 py-0.5 text-xs">dsh-data</code>（public schema，只读视图；行数为精确 count(*)，个别大表超时退 ≈ 估算，缓存 2 分钟；体积 TiKV 兼容层暂不支持）</p>
       <div class="flex items-start gap-6">
         ${tableList(tables, name)}
         <div class="min-w-0 flex-1">${main}</div>

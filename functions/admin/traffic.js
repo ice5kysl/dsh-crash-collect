@@ -1,6 +1,8 @@
 // GET /admin/traffic — 站点访问分析台（Umami → db9 site_traffic，数据只存这里，不进公开仓库）
 //
-// 一行 = 某天某来源的一份滚动窗口快照（PK date+source），最新一行即当前视图。
+// 一行 = 某天某来源某域名的一份滚动窗口快照（PK date+source+hostname，
+// hostname='' 为两站合计，非空为单域名行；2026-09-13 起分域名采集）。
+// 顶部域名 tab（?domain=）在合计与各 hostname 之间切换；旧日期只有合计行。
 // 除总体/按天/页面/来源/国家外，还展示 18 个维度的 breakdowns、近 1/7 天窗口、
 // 实时在线、快照历史，以及一屏「洞察」——把数据里能直接读出来的事实写成句子。
 
@@ -257,26 +259,72 @@ function historyTable(rows) {
 export async function onRequestGet(context) {
   const denied = guard(context)
   if (denied) return denied
-  const { env } = context
+  const { request, env } = context
   if (!env.DB9_TOKEN) return new Response('DB9_TOKEN not configured', { status: 503 })
 
   const friendly = (reason) => page(layout({ title: '站点访问', active: 'traffic', content: setupCard(reason) }))
 
+  // 域名 tab：?domain=<hostname>（空 = 全部，即 hostname='' 的合计行）。
+  // 表未迁移（无 hostname 列）时自动退回旧口径（只能看合计）。
+  const url = new URL(request.url)
+  const wantDomain = (url.searchParams.get('domain') ?? '').slice(0, 128)
+
   try {
     const settled = await Promise.allSettled([
-      sql(env, `SELECT ${COLS} FROM site_traffic WHERE source = '${SOURCE}' ORDER BY date DESC LIMIT 1`),
+      sql(env, `SELECT DISTINCT hostname FROM site_traffic WHERE source = '${SOURCE}' AND hostname <> '' ORDER BY 1`),
+      sql(env, `SELECT min(date) FROM site_traffic WHERE source = '${SOURCE}' AND hostname <> ''`),
+    ])
+    const hasHostname = settled[0].status === 'fulfilled'
+    const domains = hasHostname ? settled[0].value.map((r) => String(r[0])) : []
+    const splitStart = settled[1].status === 'fulfilled' ? settled[1].value[0]?.[0] : null
+    const domain = hasHostname && domains.includes(wantDomain) ? wantDomain : ''
+    // 指定了域名但库里没有它的行（未开始分域名采集或域名不存在）→ 明确提示，不静默回落
+    const unknownDomain = hasHostname && wantDomain && !domain
+    const hostCond = hasHostname ? ` AND hostname = '${domain.replace(/'/g, "''")}'` : ''
+
+    const tabBar = hasHostname ? `
+      <div class="mb-5 flex items-center gap-1 border-b border-slate-200">${['', ...domains].map((h) => {
+        const on = h === domain && !unknownDomain
+        const label = h === '' ? '全部' : h
+        const href = h === '' ? '/admin/traffic' : `/admin/traffic?domain=${encodeURIComponent(h)}`
+        return `<a href="${href}" class="-mb-px border-b-2 px-4 py-2 text-sm font-medium ${on ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700'}">${esc(label)}</a>`
+      }).join('')}</div>` : ''
+
+    if (unknownDomain) {
+      return page(layout({
+        title: '站点访问', active: 'traffic',
+        content: `${tabBar}
+        <div class="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm">
+          <span class="font-mono">${esc(wantDomain)}</span> 暂无快照：该日期无分域名数据（分域名采集${splitStart ? `自 ${fmtDay(splitStart)} 起拆分` : '尚未开始，等待下一次 traffic-sync'}，更早日期只有两站合计）。
+          <a class="ml-2 text-indigo-600 hover:underline" href="/admin/traffic">查看两站合计 →</a>
+        </div>`,
+      }))
+    }
+
+    const settled2 = await Promise.allSettled([
+      sql(env, `SELECT ${COLS} FROM site_traffic WHERE source = '${SOURCE}'${hostCond} ORDER BY date DESC LIMIT 1`),
       sql(env, `SELECT date, visitors, pageviews, sessions, bounces, avg_duration FROM site_traffic
-                WHERE source = '${SOURCE}' ORDER BY date DESC LIMIT 14`),
+                WHERE source = '${SOURCE}'${hostCond} ORDER BY date DESC LIMIT 14`),
       sql(env, `SELECT date, visitors, pageviews, sessions FROM site_traffic WHERE source = 'ga4' ORDER BY date DESC LIMIT 1`),
     ])
-    const errors = settled.filter((s) => s.status === 'rejected').map((s) => s.reason)
-    const latest = settled[0].status === 'fulfilled' ? settled[0].value : []
-    const historyRows = settled[1].status === 'fulfilled' ? settled[1].value : []
-    const ga4Rows = settled[2].status === 'fulfilled' ? settled[2].value : []
+    const errors = settled2.filter((s) => s.status === 'rejected').map((s) => s.reason)
+    const latest = settled2[0].status === 'fulfilled' ? settled2[0].value : []
+    const historyRows = settled2[1].status === 'fulfilled' ? settled2[1].value : []
+    const ga4Rows = settled2[2].status === 'fulfilled' ? settled2[2].value : []
 
     if (errors.some((e) => MISSING_RE.test(String(e?.message ?? e)))) return friendly('site_traffic 表不存在')
     if (!Array.isArray(latest) || !latest.length) {
       if (errors.length) return errorPage(errors[0])
+      if (domain) {
+        return page(layout({
+          title: '站点访问', active: 'traffic',
+          content: `${tabBar}
+          <div class="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm">
+            <span class="font-mono">${esc(domain)}</span> 暂无快照：该日期无分域名数据（分域名采集${splitStart ? `自 ${fmtDay(splitStart)} 起拆分` : '尚未开始，等待下一次 traffic-sync'}，更早日期只有两站合计）。
+            <a class="ml-2 text-indigo-600 hover:underline" href="/admin/traffic">查看两站合计 →</a>
+          </div>`,
+        }))
+      }
       return friendly()
     }
 
@@ -306,7 +354,7 @@ export async function onRequestGet(context) {
     }).join('')
 
     const ga4Row = ga4Rows[0] ?? null
-    const ga4Block = ga4Row
+    const ga4Block = domain === '' && ga4Row
       ? `<section class="mt-10 border-t border-slate-200 pt-6">
           <div class="mb-2 flex items-center gap-2"><h2 class="text-lg font-semibold text-slate-900">GA4（历史来源）</h2>${badge('ga4', 'sky')}</div>
           <p class="text-sm text-slate-500">dsh-why.com 自 2026-09-13 起改用 Umami（并入上面的 umami 快照，按域名拆），此处只保留最后一次 GA4 快照：${fmtDay(ga4Row[0])} · ${fmtInt(ga4Row[1])} 访客 · ${fmtInt(ga4Row[2])} 浏览 · ${fmtInt(ga4Row[3])} 会话。</p>
@@ -314,8 +362,9 @@ export async function onRequestGet(context) {
       : ''
 
     const content = `
+      ${tabBar}
       <div class="mb-1 flex flex-wrap items-center gap-2">
-        <h2 class="text-lg font-semibold text-slate-900">Umami（两站合计）</h2>
+        <h2 class="text-lg font-semibold text-slate-900">Umami（${domain ? esc(domain) : '两站合计'}）</h2>
         ${badge('umami', 'green')}
         ${active != null ? badge(`实时在线 ${Number(active)}`, 'indigo') : ''}
       </div>

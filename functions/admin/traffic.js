@@ -1,15 +1,15 @@
-// GET /admin/traffic — 站点访问：Umami(dsh-insights.com) + GA4(dsh-why.com) 的滚动窗口快照
+// GET /admin/traffic — 站点访问：Umami(dsh-insights.com + dsh-why.com，按 hostname 拆) 的滚动窗口快照
 // 数据来自共享 dsh-data 库的 site_traffic 表（每日一行，最新一行即当前视图）。
 // 刻意不写入公开仓库，本页是唯一展示入口。
 
 import { badge, card, esc, errorPage, guard, layout, page, sql, table } from './_layout.js'
 
 const SOURCES = [
-  { key: 'umami', label: 'dsh-insights.com（Umami）', note: '公开分享链接', tone: 'green' },
-  { key: 'ga4', label: 'dsh-why.com（GA4）', note: 'GA4 Data API', tone: 'sky' },
+  { key: 'umami', label: 'Umami（两站合计）', note: 'dsh-insights.com + dsh-why.com 共用一个 website，下方按域名拆开', tone: 'green' },
+  { key: 'ga4', label: 'GA4（历史来源）', note: 'dsh-why.com 2026-09-13 起改用 Umami，此处只会有旧快照', tone: 'sky' },
 ]
 
-const COLS = 'date, window_days, visitors, pageviews, sessions, bounces, avg_duration, daily, top_paths, referrers, countries, collected_at'
+const COLS = 'date, window_days, visitors, pageviews, sessions, bounces, avg_duration, daily, top_paths, referrers, countries, hostnames, collected_at'
 
 // db9 报「表不存在 / 关系未定义」时走友好空状态，而不是把错误信息当堆栈抛给用户
 const MISSING_RE = /does not exist|doesn't exist|no such table|undefined table|unknown relation|unknown table/i
@@ -104,11 +104,16 @@ function sourceSection(src, row) {
     </div>`
   }
 
-  const [date, windowDays, visitors, pageviews, sessions, bounces, avgDuration, daily, topPaths, referrers, countries, collectedAt] = row
+  const [date, windowDays, visitors, pageviews, sessions, bounces, avgDuration, daily, topPaths, referrers, countries, hostnames, collectedAt] = row
 
   const paths = parseList(topPaths).filter((x) => x && typeof x === 'object')
   const refs = parseList(referrers).filter((x) => x && typeof x === 'object')
   const geos = parseList(countries).filter((x) => x && typeof x === 'object')
+  const hosts = parseList(hostnames).filter((x) => x && typeof x === 'object')
+
+  const hostRows = hosts.map((h) => `<tr class="hover:bg-slate-50">
+    <td class="px-4 py-2.5 font-mono text-xs">${esc(truncate(h.host ?? '—', 32))}</td>
+    <td class="px-4 py-2.5 text-right font-semibold">${fmtInt(h.visitors)}</td></tr>`).join('')
 
   const pathRows = paths.map((p) => `<tr class="hover:bg-slate-50">
     <td class="px-4 py-2.5 font-mono text-xs" title="${esc(p.path ?? '')}">${esc(truncate(p.path ?? '—'))}</td>
@@ -142,7 +147,8 @@ function sourceSection(src, row) {
       <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">${dailyBars(daily)}</div>
     </section>
 
-    <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-4">
+      <div class="min-w-0"><h3 class="mb-3 font-semibold text-slate-900">域名 Top</h3>${table(['域名', '访客'], hostRows)}</div>
       <div class="min-w-0"><h3 class="mb-3 font-semibold text-slate-900">页面 Top</h3>${table(['路径', '浏览量'], pathRows)}</div>
       <div class="min-w-0"><h3 class="mb-3 font-semibold text-slate-900">来源 Top</h3>${table(['来源', '会话'], refRows)}</div>
       <div class="min-w-0"><h3 class="mb-3 font-semibold text-slate-900">国家 Top</h3>${table(['国家', '会话'], geoRows)}</div>

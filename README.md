@@ -93,7 +93,7 @@ FROM reports GROUP BY sig, category ORDER BY organic DESC, seeded DESC;
 
 1. 推送本仓库到 GitHub，EdgeOne Pages 项目关联仓库（构建命令留空，输出目录 `public`），push 即自动部署。
 2. 配好上面四个环境变量（`SEED_KEY` 不配也能跑，只是种子通道关闭）。
-3. 本地调试（可选）：`npm i -g edgeone && edgeone pages dev`。
+3. 本地调试（可选）：`npm i -g edgeone && edgeone pages dev`；或 `DB9_TOKEN=<token> EXPORT_KEY=dsh ADMIN_KEY=dsh node scripts/dev.mjs`（localhost:8787）。本地建议连开发分支库避免污染生产：`DB9_SQL_URL=https://api.db9.ai/customer/databases/42r75opjazyn/sql`（`dsh-data-dev`，token 用 `db9 token create --scope 42r75opjazyn:rw` 自建）。
 
 ## 验证
 

@@ -151,6 +151,15 @@ curl -X POST https://api.dsh-why.com/v1/llm \
 返回 DeepSeek chat completion 原文透传（响应头带 `x-llm-latency-ms`）；
 DeepSeek 侧的报错（key 失效 / 限流 / 模型名错）原样透传状态码和 body 给调用方。
 
+### 调用记录与统计
+
+每次上游调用（含失败）记录一行到 db9 `llm_calls` 表：`model`、token 数
+（入/出/合计）、`latency_ms`、`upstream_status`、错误签名、时间。
+**只记统计字段，不存消息内容**（与 `/v1/report` 的隐私红线一致）。
+写入 fire-and-forget 不阻塞响应（有 `ctx.waitUntil` 则挂上去保证落库）；
+90 天滚动清理。统计在 `/admin/llm` 页顶部：总览卡片（总量/成功率/tokens/
+平均延迟）+ 按天（14 天）+ 按模型 + 最近 50 条。
+
 ## 冷启动种子（scripts/seed-corpus.mjs）
 
 一次性运维工具：用 db9 `compat_observations` 表里的**实测**观察（真实发布包里

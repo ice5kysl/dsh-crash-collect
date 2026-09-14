@@ -11,7 +11,7 @@
 // 出参：DeepSeek chat completion 原文透传（非流式；stream 暂不支持）。
 // 配置存 db9 llm_config 表（见 functions/_lib/llm.js），30s 缓存。
 
-import { DEFAULT_MODEL, loadConfig, postChat } from '../_lib/llm.js'
+import { DEFAULT_MODEL, loadConfig, postChat, recordCall } from '../_lib/llm.js'
 
 const MAX_BODY_BYTES = 131072
 const MAX_MESSAGES = 100
@@ -50,7 +50,8 @@ function buildMessages(body) {
   return null
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(context) {
+  const { request, env } = context
   const len = Number(request.headers.get('content-length')) || 0
   if (len > MAX_BODY_BYTES) return json({ ok: false, error: 'body too large' }, 413)
 
@@ -103,17 +104,50 @@ export async function onRequestPost({ request, env }) {
   try {
     upstream = await postChat(apiKey, payload, UPSTREAM_TIMEOUT_MS)
   } catch (err) {
+    track(context, env, {
+      model: payload.model, status: 0, ok: false, latencyMs: Date.now() - started,
+      error: `network: ${String(err?.message ?? err).slice(0, 100)}`,
+    })
     return json({ ok: false, error: `upstream unreachable: ${err?.message ?? err}` }, 502)
   }
+
+  const latencyMs = Date.now() - started
+  const text = await upstream.text()
+
+  // 从响应体里抠 usage 统计（DeepSeek 返回 OpenAI 标准 usage 字段）；抠不到就只记状态。
   // 状态与响应体透传：DeepSeek 的 error JSON 对调用方排障有用（key 失效、限流、模型名错等）
-  return new Response(await upstream.text(), {
+  let usage = null
+  let echoedModel = payload.model
+  let errorSig = null
+  try {
+    const parsed = JSON.parse(text)
+    usage = parsed.usage ?? null
+    echoedModel = parsed.model ?? payload.model
+    if (!upstream.ok) errorSig = `${upstream.status} ${parsed?.error?.code ?? ''}`.trim()
+  } catch {
+    if (!upstream.ok) errorSig = `HTTP ${upstream.status}`
+  }
+  track(context, env, {
+    model: echoedModel, status: upstream.status, ok: upstream.ok, latencyMs,
+    promptTokens: usage?.prompt_tokens, completionTokens: usage?.completion_tokens,
+    totalTokens: usage?.total_tokens, error: errorSig,
+  })
+
+  return new Response(text, {
     status: upstream.status,
     headers: {
       'content-type': upstream.headers.get('content-type') ?? 'application/json; charset=UTF-8',
       'access-control-allow-origin': '*',
-      'x-llm-latency-ms': String(Date.now() - started),
+      'x-llm-latency-ms': String(latencyMs),
     },
   })
+}
+
+// 记录调用：fire-and-forget，绝不让统计写入拖慢响应。运行时支持 ctx.waitUntil
+// 就挂上去（响应返回后保证执行完），否则纯后台跑，极端情况下丢少量行。
+function track(context, env, rec) {
+  const pending = recordCall(env, rec)
+  if (typeof context.waitUntil === 'function') context.waitUntil(pending)
 }
 
 export function onRequestOptions() {

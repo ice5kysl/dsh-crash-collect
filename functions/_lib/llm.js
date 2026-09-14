@@ -79,3 +79,42 @@ export async function postChat(apiKey, payload, timeoutMs) {
     clearTimeout(timer)
   }
 }
+
+// 调用记录：只存统计字段（模型/token 数/延迟/状态码/错误签名），绝不存消息内容——
+// 隐私红线与 /v1/report 一致。写入 fire-and-forget：调用方不 await，不阻塞响应；
+// 少量丢失不影响统计口径。90 天滚动清理（随每次写入顺带执行，表小代价可忽略）。
+const CREATE_CALLS_TABLE = `CREATE TABLE IF NOT EXISTS llm_calls (
+  id BIGSERIAL PRIMARY KEY,
+  model TEXT NOT NULL DEFAULT 'unknown',
+  upstream_status INT NOT NULL DEFAULT 0,
+  ok BOOLEAN NOT NULL DEFAULT FALSE,
+  prompt_tokens INT,
+  completion_tokens INT,
+  total_tokens INT,
+  latency_ms INT NOT NULL DEFAULT 0,
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+
+const CREATE_CALLS_INDEX = `CREATE INDEX IF NOT EXISTS llm_calls_created_at_idx ON llm_calls (created_at DESC)`
+
+export async function ensureCallsTable(env) {
+  await sql(env, CREATE_CALLS_TABLE)
+  await sql(env, CREATE_CALLS_INDEX)
+}
+
+// rec: {model, status, ok, promptTokens?, completionTokens?, totalTokens?, latencyMs, error?}
+// status=0 表示网络失败/超时（没拿到 DeepSeek 响应）。
+export function recordCall(env, rec) {
+  const num = (v) => (Number.isFinite(v) ? String(Math.round(v)) : 'NULL')
+  const str = (v) => (v ? `'${sq(String(v).slice(0, 128))}'` : 'NULL')
+  const query = `INSERT INTO llm_calls
+    (model, upstream_status, ok, prompt_tokens, completion_tokens, total_tokens, latency_ms, error)
+    VALUES ('${sq(String(rec.model || 'unknown').slice(0, 128))}', ${num(rec.status)},
+            ${rec.ok ? 'TRUE' : 'FALSE'}, ${num(rec.promptTokens)}, ${num(rec.completionTokens)},
+            ${num(rec.totalTokens)}, ${num(rec.latencyMs)}, ${str(rec.error)})`
+  return (async () => {
+    await ensureCallsTable(env)
+    await sql(env, query)
+    await sql(env, "DELETE FROM llm_calls WHERE created_at < now() - interval '90 days'")
+  })().catch(() => {})
+}

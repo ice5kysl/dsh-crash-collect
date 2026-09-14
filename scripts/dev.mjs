@@ -18,6 +18,7 @@ const ROUTES = [
   ['/admin/reports', 'functions/admin/reports.js'],
   ['/admin/signatures', 'functions/admin/signatures.js'],
   ['/admin/traffic', 'functions/admin/traffic.js'],
+  ['/admin/digest', 'functions/admin/digest.js'],
   ['/admin/tables', 'functions/admin/tables.js'],
   ['/admin/plugins', 'functions/admin/plugins.js'],
   ['/admin/events', 'functions/admin/events.js'],

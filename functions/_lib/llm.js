@@ -62,3 +62,20 @@ export async function saveConfig(env, entries) {
   }
   invalidateCache()
 }
+
+// 调 DeepSeek chat completions。EdgeOne Pages 运行时的 AbortSignal 没有 .timeout()，
+// 用 AbortController + setTimeout 手动包超时（abort 时 fetch reject AbortError）。
+export async function postChat(apiKey, payload, timeoutMs) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(DEEPSEEK_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}

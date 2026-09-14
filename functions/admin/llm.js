@@ -2,7 +2,7 @@
 // 外加「发送测试请求」验证配置可用。配置存 db9 llm_config 表，见 functions/_lib/llm.js。
 
 import { badge, card, esc, errorPage, guard, layout, page } from './_layout.js'
-import { DEFAULT_MODEL, DEEPSEEK_URL, loadConfig, saveConfig } from '../_lib/llm.js'
+import { DEFAULT_MODEL, loadConfig, postChat, saveConfig } from '../_lib/llm.js'
 
 const RE_MODEL = /^[a-z0-9._:-]{1,128}$/i
 
@@ -128,12 +128,11 @@ export async function onRequestPost(context) {
       if (!apiKey) return await render(context, { testResult: { ok: false, latencyMs: 0, error: '尚未保存 api_key' } })
       const model = config.model?.value || DEFAULT_MODEL
       const started = Date.now()
-      const upstream = await fetch(DEEPSEEK_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping，请只回复: ok' }], max_tokens: 16 }),
-        signal: AbortSignal.timeout(60000),
-      })
+      const upstream = await postChat(apiKey, {
+        model,
+        messages: [{ role: 'user', content: 'ping，请只回复: ok' }],
+        max_tokens: 16,
+      }, 60000)
       const latencyMs = Date.now() - started
       const text = await upstream.text()
       if (!upstream.ok) {

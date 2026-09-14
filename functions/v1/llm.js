@@ -11,7 +11,7 @@
 // 出参：DeepSeek chat completion 原文透传（非流式；stream 暂不支持）。
 // 配置存 db9 llm_config 表（见 functions/_lib/llm.js），30s 缓存。
 
-import { DEFAULT_MODEL, DEEPSEEK_URL, loadConfig } from '../_lib/llm.js'
+import { DEFAULT_MODEL, loadConfig, postChat } from '../_lib/llm.js'
 
 const MAX_BODY_BYTES = 131072
 const MAX_MESSAGES = 100
@@ -101,12 +101,7 @@ export async function onRequestPost({ request, env }) {
   const started = Date.now()
   let upstream
   try {
-    upstream = await fetch(DEEPSEEK_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    })
+    upstream = await postChat(apiKey, payload, UPSTREAM_TIMEOUT_MS)
   } catch (err) {
     return json({ ok: false, error: `upstream unreachable: ${err?.message ?? err}` }, 502)
   }

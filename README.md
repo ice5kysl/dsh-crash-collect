@@ -43,7 +43,7 @@ dsh-why 崩溃案例上报的收集端点，部署在 **EdgeOne Pages Functions*
 
 ## 存储（db9）
 
-库 `dsh-data`（id `toc6zdt4vd7j`，与 dsh-insights 生态表同库；2026-09 自旧库 `dsh-crash` 迁入），表 `reports`：
+库 `dsh-data`（id `toc6zdt4vd7j`，与 dsh-insights 生态表同库；2026-09 自旧库 `dsh-crash` 迁入），表 `reports`、`llm_config`（LLM 转发配置）、`llm_calls`（LLM 调用统计）、`pipeline_runs`（dsh-insights 定时 pipeline 运行记录，`/admin/pipeline` 展示）：
 
 ```sql
 id BIGSERIAL PK · sig TEXT · category TEXT · shell TEXT ·

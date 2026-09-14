@@ -25,6 +25,7 @@ const ROUTES = [
   ['/admin/letters', 'functions/admin/letters.js'],
   ['/admin/llm', 'functions/admin/llm.js'],
   ['/admin/llm-stats', 'functions/admin/llm-stats.js'],
+  ['/admin/pipeline', 'functions/admin/pipeline.js'],
   ['/admin', 'functions/admin/index.js'],
   ['/v1/report', 'functions/v1/report.js'],
   ['/v1/stats', 'functions/v1/stats.js'],

@@ -110,10 +110,10 @@ export const card = (label, value, sub = '') => `
     ${sub ? `<div class="mt-1 text-xs text-slate-400">${sub}</div>` : ''}
   </div>`
 
-export const table = (heads, rows, empty = '暂无数据') => `
+export const table = (heads, rows, empty = '暂无数据', aligns = []) => `
   <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
     <table class="min-w-full divide-y divide-slate-200 text-sm">
-      <thead class="bg-slate-50"><tr>${heads.map((h) => `<th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">${h}</th>`).join('')}</tr></thead>
+      <thead class="bg-slate-50"><tr>${heads.map((h, i) => `<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 text-${aligns[i] ?? 'left'}">${h}</th>`).join('')}</tr></thead>
       <tbody class="divide-y divide-slate-100">${rows || `<tr><td colspan="${heads.length}" class="px-4 py-8 text-center text-slate-400">${empty}</td></tr>`}</tbody>
     </table>
   </div>`

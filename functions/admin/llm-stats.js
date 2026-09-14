@@ -55,7 +55,7 @@ export async function onRequestGet(context) {
   const recentRows = recent.map((r) => `<tr class="hover:bg-slate-50">
     <td class="px-4 py-2.5 text-slate-400">${esc(String(r[0]).slice(5, 19).replace('T', ' '))}</td>
     <td class="px-4 py-2.5 font-mono text-xs">${esc(r[1])}</td>
-    <td class="px-4 py-2.5">${r[3] ? badge(String(r[2]), 'green') : badge(String(r[2]) || 'err', 'red')}</td>
+    <td class="px-4 py-2.5 text-center">${r[3] ? badge(String(r[2]), 'green') : badge(String(r[2]) || 'err', 'red')}</td>
     <td class="px-4 py-2.5 text-right">${r[4] ?? '—'}</td>
     <td class="px-4 py-2.5 text-right">${r[5] ?? '—'}</td>
     <td class="px-4 py-2.5 text-right">${r[6]}ms</td>
@@ -74,16 +74,16 @@ export async function onRequestGet(context) {
       <div class="mb-8 grid grid-cols-1 gap-8 2xl:grid-cols-2">
         <section>
           <h2 class="mb-3 font-semibold text-slate-900">按天（近 14 天）</h2>
-          ${table(['日期', '调用', '失败', '入 tokens', '出 tokens', '平均延迟'], dayRows)}
+          ${table(['日期', '调用', '失败', '入 tokens', '出 tokens', '平均延迟'], dayRows, '暂无数据', ['left', 'right', 'right', 'right', 'right', 'right'])}
         </section>
         <section>
           <h2 class="mb-3 font-semibold text-slate-900">按模型</h2>
-          ${table(['模型', '调用', 'tokens', '平均延迟'], modelRows)}
+          ${table(['模型', '调用', 'tokens', '平均延迟'], modelRows, '暂无数据', ['left', 'right', 'right', 'right'])}
         </section>
       </div>
       <section class="mb-4">
         <h2 class="mb-3 font-semibold text-slate-900">最近 50 次调用</h2>
-        ${table(['时间', '模型', '状态', '入', '出', '延迟', '错误'], recentRows)}
+        ${table(['时间', '模型', '状态', '入', '出', '延迟', '错误'], recentRows, '暂无数据', ['left', 'left', 'center', 'right', 'right', 'right', 'left'])}
       </section>
       <p class="text-xs text-slate-400">只记录统计字段（模型 / token 数 / 延迟 / 状态码 / 错误签名），不存消息内容；90 天滚动清理。测试按钮产生的 ping 调用也计入。</p>`,
   }))

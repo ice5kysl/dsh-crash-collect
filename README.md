@@ -157,7 +157,7 @@ DeepSeek 侧的报错（key 失效 / 限流 / 模型名错）原样透传状态�
 （入/出/合计）、`latency_ms`、`upstream_status`、错误签名、时间。
 **只记统计字段，不存消息内容**（与 `/v1/report` 的隐私红线一致）。
 写入 fire-and-forget 不阻塞响应（有 `ctx.waitUntil` 则挂上去保证落库）；
-90 天滚动清理。统计在 `/admin/llm` 页顶部：总览卡片（总量/成功率/tokens/
+90 天滚动清理。统计在独立页 `/admin/llm-stats`：总览卡片（总量/成功率/tokens/
 平均延迟）+ 按天（14 天）+ 按模型 + 最近 50 条。
 
 ## 冷启动种子（scripts/seed-corpus.mjs）

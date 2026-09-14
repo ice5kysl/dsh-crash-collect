@@ -50,6 +50,7 @@ const NAV = [
   { href: '/admin/letters', key: 'letters', label: '周报', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
   { group: '服务' },
   { href: '/admin/llm', key: 'llm', label: 'LLM 转发', icon: 'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
+  { href: '/admin/llm-stats', key: 'llm-stats', label: 'LLM 统计', icon: 'M9 19v-6m4 6V7m4 10v-3M5 21h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2z' },
   { group: '数据库' },
   { href: '/admin/tables', key: 'tables', label: '表浏览', icon: 'M12 3c-4.4 0-8 1.3-8 3v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0-1.7-3.6-3-8-3zM4 12c0 1.7 3.6 3 8 3s8-1.3 8-3M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3' },
 ]

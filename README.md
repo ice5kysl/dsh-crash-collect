@@ -9,6 +9,7 @@ dsh-why 崩溃案例上报的收集端点，部署在 **EdgeOne Pages Functions*
 | `/v1/report` | POST | 上报一条失败案例；白名单校验，含白名单外字段的请求一律拒绝 |
 | `/v1/stats` | GET | 公开统计（用户上报数 / 去重签名数；冷启动种子单列，绝不混入） |
 | `/v1/export?key=…` | GET | pipeline 拉取明细（JSONL，需 `EXPORT_KEY`）；pipeline 也可直接 psql 查库 |
+| `/v1/llm` | POST | LLM 转发（DeepSeek）：应用带 `x-llm-key` 调用，服务端持有真实 API key，见下文「LLM 转发」 |
 
 ## 上报协议（v1）
 
@@ -117,6 +118,38 @@ dsh-insights pipeline 每日查库（或调 `/v1/export`），按 `sig` 聚合�
 的签名带 `seeded: true`；dsh-why 诊断时经 `lib/net.mjs` 拉取，命中用户上报才说
 「社区语料：已见 N 例上报」，只有种子时说「已知崩溃模式：上游实测语料命中」。
 拉不到就静默不显示（读路径与 compat-observed 同构，绝不阻塞诊断）。
+
+## LLM 转发（/v1/llm）
+
+给生态应用一个统一的 LLM 调用口：调用方只持有一个 `client_key`，真正的
+DeepSeek API key 存在服务端 db9 的 `llm_config` 表（30s 缓存），**绝不回传**。
+LLM 调用要花钱，所以不像 `/v1/report` 裸奔——没有 `client_key` 一律 401。
+
+配置在 `/admin/llm` 页在线改（不用动 EdgeOne 环境变量），三个键：
+
+| key | 说明 |
+|---|---|
+| `api_key` | DeepSeek API key（sk-…），服务端持有 |
+| `model` | 缺省模型，默认 `deepseek-flash`，请求可带 `model` 覆盖 |
+| `client_key` | 应用调用时必须带的 `x-llm-key` 头，随机长字符串 |
+
+调用（OpenAI chat completion 格式，非流式）：
+
+```bash
+curl -X POST https://api.dsh-why.com/v1/llm \
+  -H 'content-type: application/json' \
+  -H 'x-llm-key: <client_key>' \
+  -d '{"prompt":"你好"}'
+
+# 或完整 messages 形式；可选 temperature(0-2) / max_tokens(≤8192) / model
+curl -X POST https://api.dsh-why.com/v1/llm \
+  -H 'content-type: application/json' \
+  -H 'x-llm-key: <client_key>' \
+  -d '{"messages":[{"role":"user","content":"你好"}],"temperature":0.7}'
+```
+
+返回 DeepSeek chat completion 原文透传（响应头带 `x-llm-latency-ms`）；
+DeepSeek 侧的报错（key 失效 / 限流 / 模型名错）原样透传状态码和 body 给调用方。
 
 ## 冷启动种子（scripts/seed-corpus.mjs）
 

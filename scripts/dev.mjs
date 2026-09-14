@@ -23,10 +23,12 @@ const ROUTES = [
   ['/admin/plugins', 'functions/admin/plugins.js'],
   ['/admin/events', 'functions/admin/events.js'],
   ['/admin/letters', 'functions/admin/letters.js'],
+  ['/admin/llm', 'functions/admin/llm.js'],
   ['/admin', 'functions/admin/index.js'],
   ['/v1/report', 'functions/v1/report.js'],
   ['/v1/stats', 'functions/v1/stats.js'],
   ['/v1/export', 'functions/v1/export.js'],
+  ['/v1/llm', 'functions/v1/llm.js'],
 ]
 
 const MIME = { '.html': 'text/html; charset=UTF-8', '.css': 'text/css', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml' }

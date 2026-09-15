@@ -8,6 +8,14 @@ import { badge, card, esc, errorPage, guard, layout, page, sql, table } from './
 const MODE_BADGE = { hourly: ['hourly', 'slate'], daily: ['daily', 'indigo'], monday: ['monday', 'amber'], full: ['full', 'sky'] }
 const STATUS_BADGE = { success: ['成功', 'green'], failure: ['失败', 'red'], cancelled: ['取消', 'slate'] }
 
+// 定时器清单：refresh.yml 的 profile 一览（干什么 / 何时跑），上次运行来自 pipeline_runs 按模式聚合
+const TIMERS = [
+  { mode: 'hourly', name: 'hourly 增量纳新', desc: 'discover-incr + validate + dynamics + 发布层（增量）', when: 'schedule 每小时 :23（GitHub 尽力投递，实测 2~6h 落一次）；当日 daily 已跑时，每个投递到的事件都跑它' },
+  { mode: 'daily', name: 'daily 日更', desc: '全量快照刷新 + project_metrics + db9-sync 九源同步 + 站点流量采集', when: '每个 UTC 日首个被投递的 schedule 事件（data/last-daily.txt 去重）' },
+  { mode: 'monday', name: 'monday 周一全量', desc: 'daily 全部 + 作者关系图 + 生态周报（按上一完结 ISO 周出刊）', when: '周一 UTC 首个 schedule 事件；或手动 workflow_dispatch mode=monday' },
+  { mode: 'full', name: 'full 全量重建', desc: '从头跑全量管线（重扫全部候选），重活，平时不跑', when: '仅手动 workflow_dispatch mode=full' },
+]
+
 export async function onRequestGet(context) {
   const denied = guard(context)
   if (denied) return denied
@@ -21,7 +29,7 @@ export async function onRequestGet(context) {
       started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       duration_ms INT, run_url TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
 
-    const [totals, lastSuccess, lastDaily, runs] = await Promise.all([
+    const [totals, lastSuccess, lastDaily, runs, byMode] = await Promise.all([
       sql(env, `SELECT
                   count(*) FILTER (WHERE started_at > now() - interval '24 hours') AS day,
                   count(*) FILTER (WHERE status = 'failure' AND started_at > now() - interval '7 days') AS fail7d
@@ -30,6 +38,12 @@ export async function onRequestGet(context) {
       sql(env, "SELECT started_at FROM pipeline_runs WHERE status = 'success' AND mode IN ('daily','monday') ORDER BY started_at DESC LIMIT 1").then((r) => r[0] ?? [null]),
       sql(env, `SELECT run_id, event, mode, status, started_at, duration_ms, run_url
                 FROM pipeline_runs ORDER BY id DESC LIMIT 30`),
+      sql(env, `SELECT mode,
+                  max(started_at) FILTER (WHERE status = 'success') AS last_ok,
+                  max(started_at) AS last_any,
+                  count(*) AS runs,
+                  count(*) FILTER (WHERE status = 'failure') AS fails
+                FROM pipeline_runs GROUP BY mode`),
     ])
 
     const now = Date.now()
@@ -56,6 +70,20 @@ export async function onRequestGet(context) {
         <td class="px-4 py-2.5"><a class="text-indigo-600 hover:underline" href="${esc(r[6] || '#')}">#${r[0]}</a></td></tr>`
     }).join('')
 
+    const modeStats = Object.fromEntries((byMode ?? []).map((r) => [r[0], r]))
+    const timerRows = TIMERS.map((t) => {
+      const s = modeStats[t.mode]
+      const lastOk = s?.[1] ? `${esc(String(s[1]).slice(5, 16).replace('T', ' '))}（${hoursSince(s[1])}h 前）` : '<span class="text-slate-300">从未成功</span>'
+      const fails = s && s[4] > 0 ? ` · <span class="text-red-600">失败 ${s[4]}</span>` : ''
+      const [mb, mt] = MODE_BADGE[t.mode]
+      return `<tr class="hover:bg-slate-50">
+        <td class="px-4 py-2.5">${badge(mb, mt)}<div class="mt-0.5 text-xs text-slate-500">${esc(t.name)}</div></td>
+        <td class="px-4 py-2.5 text-sm text-slate-600">${esc(t.desc)}</td>
+        <td class="px-4 py-2.5 text-xs text-slate-500">${esc(t.when)}</td>
+        <td class="px-4 py-2.5 text-sm">${lastOk}</td>
+        <td class="px-4 py-2.5 text-right text-sm">${s ? `${s[3]} 次${fails}` : '<span class="text-slate-300">—</span>'}</td></tr>`
+    }).join('')
+
     return page(layout({
       title: 'Pipeline 监控',
       active: 'pipeline',
@@ -64,6 +92,10 @@ export async function onRequestGet(context) {
           <div class="mb-1 font-semibold">⚠️ 定时器异常</div>${alerts.map((a) => `<div>· ${esc(a)}</div>`).join('')}
           <div class="mt-1 text-xs">GitHub 仓库会自动开 ops-timer issue 告警（refresh.yml 的 run-report 步骤）。</div>
         </div>` : `<div class="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">定时器运行正常。</div>`}
+        <section class="mb-8">
+          <h2 class="mb-3 font-semibold text-slate-900">定时器清单（dsh-insights / refresh.yml）</h2>
+          ${table(['定时器', '干什么', '何时跑', '上次成功 (UTC)', '累计'], timerRows, '暂无记录', ['left', 'left', 'left', 'left', 'right'])}
+        </section>
         <div class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           ${card('今日 daily（UTC）', dailyToday ? badge('已跑', 'green') : badge('未跑', dailyLate ? 'red' : 'amber'), `UTC 今天 ${utcHour} 点 · 上次 daily ${lastDaily?.[0] ? esc(String(lastDaily[0]).slice(5, 16)).replace('T', ' ') : '—'}`)}
           ${card('距上次成功', lastSuccessH != null ? `${lastSuccessH} h` : '—', '任何模式')}
